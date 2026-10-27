@@ -47,7 +47,18 @@
 
 ---
 
-## 4. 如果将来真的要复制代码
+## 4. 社区报告与修复（按时间）
+
+| 贡献者 | 内容 | 落地 |
+|---|---|---|
+| [@dugu951](https://github.com/dugu951) | 指出"没配 ASR 后端时长视频仍自称 `transcript=\"asr\"`"，并给出修复 | PR #3，合并于 `22546db`；合并后补了单窗口分支与"没跑"vs"跑了没结果"的区分 |
+| [@ggfgfgf-on](https://github.com/ggfgfgf-on) | [issue #1](https://github.com/SAOS-3624/dsh-video-storyboard/issues/1) 的 10 条诊断（色相非环形、低饱和假切点、<0.4s 崩溃、`index+time` 未实现、VFR/SAR 等） | 其中 4 条已在主线以重写形式落地：`819b8d2`、`04d318a`、`018b7ea`、`38df7a0`；PR #2 以 `7b6451d` 记录（该分支基于 `f3b7ce4`，冲突无法直接合，采用"接受贡献、保留我方实现"的合并） |
+| [@canyueY](https://github.com/canyueY) | V2 结构调整、可选富化侧车（说话人分离/远程镜头检测）、`video_zoom.mode` 的提出 | 讨论中，分支开发中；本项目已先行吸收 `fast cuts`（爆点与镜头数）与 `seen before`（`src/memory.js` 记忆层） |
+| [@xingyueDanYang](https://github.com/xingyueDanYang) | [issue #4](https://github.com/SAOS-3624/dsh-video-storyboard/issues/4) 的 5 条接入建议（转写层接受已有 JSON/SRT 或命令、ffmpeg 发现路径等） | 待评估 |
+
+> 这份表只记"提出并推动了什么"，不区分代码是否被逐行采用——诊断、复现和反例同样计入。
+
+## 5. 如果将来真的要复制代码
 
 复制 MIT / BSD 代码是完全合法的，但要**随分发附带原版权声明与许可全文**。做法：
 

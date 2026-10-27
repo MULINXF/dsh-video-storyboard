@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+**Credits for the people who found these.** `CREDITS.md` now has a contributors table: @dugu951 (PR #3),
+@ggfgfgf-on (issue #1 — four of the ten items landed here), @canyueY (enrichment + memory direction) and
+@xingyueDanYang (issue #4, not yet evaluated). PR #2 is recorded as a merge (`7b6451d`) that deliberately
+keeps our tree: its branch was based on `f3b7ce4` and no longer applies, but the contribution deserves to be
+in the history rather than erased by a close-without-merge.
+
 **Removed `burn: "index+time"`.** It was in the parameter enum, in the tool description and in the docs, and
 it did nothing — no code ever drew a timecode. A public option that silently behaves like another option is
 worse than no option. Timecodes stay in the text (0.01 s precision); burning them into pixels costs frame
