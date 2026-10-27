@@ -131,7 +131,7 @@ export async function runStoryboard(opts) {
           transcriptInfo = {
             ...(replaced > 0 ? { termsFixed: replaced } : {}),
             ...asr,
-            source: 'asr',
+            source: asr.empty ? 'asr-empty' : 'asr',
             segments: fixed,
             suspect: dropped.length,
             suspectDetail: dropped.slice(0, 3).map((d) => ({
@@ -626,6 +626,10 @@ export function formatManifest(result, {
       lines.push(`${result.transcript.suspect} segment(s) ignored as non-speech: ${detail}` +
         (result.transcript.suspect > 3 ? ', …' : ''));
     }
+  }
+  if (result.transcript?.source === 'asr-empty') {
+    lines.push('transcript: ASR produced no speech (this is not a subtitle track failure). ' +
+      'Treat the video as having no dialogue — rely on the pictures and the audio strip.');
   }
   if (result.transcript?.source === 'asr-failed') {
     lines.push(`transcript unavailable: ${result.transcript.error ?? 'ASR call failed'}`);
