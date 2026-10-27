@@ -12,8 +12,9 @@ import { promisify } from 'node:util';
 
 const run = promisify(execFile);
 
-export const DEFAULT_FFMPEG = process.env.DSH_FFMPEG_PATH || process.env.FFMPEG_PATH || 'ffmpeg';
-export const DEFAULT_FFPROBE = process.env.DSH_FFPROBE_PATH || process.env.FFPROBE_PATH || 'ffprobe';
+import { DEFAULT_FFMPEG, DEFAULT_FFPROBE } from './binaries.js';
+
+export { DEFAULT_FFMPEG, DEFAULT_FFPROBE };
 
 /** "25/1" | "30000/1001" | "32:27" → number | null */
 export function parseRational(value) {

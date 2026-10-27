@@ -228,6 +228,12 @@ density(t) = clamp(局部剪辑率 / 全片平均剪辑率, 1, 2.5)
 只想分析一首歌                     → 音乐分析类插件
 ```
 
+## 媒体依赖
+
+优先使用 `$DSH_HOME/bin/ffmpeg`（Windows 为 `ffmpeg.exe`）和 `$DSH_HOME/bin/ffprobe`，
+找不到时再回退 `PATH`；`DSH_FFMPEG_PATH` / `DSH_FFPROBE_PATH` 可显式覆盖。把两个二进制放进
+DSH home 的 `bin/` 即可，不需要全局安装，也不会污染系统 PATH。
+
 ## 许可
 
 MIT。不复制任何第三方源码；ffmpeg、模型权重、视频素材都不随仓库分发。ASR 默认对接用户自建的 OpenAI 兼容端点（如 SenseVoiceSmall，FunAudioLLM / 阿里，遵循 FunASR Model License v1.1，保留署名）。

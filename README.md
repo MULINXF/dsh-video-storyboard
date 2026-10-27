@@ -8,7 +8,8 @@
 >
 > **中文说明：[README.zh.md](./README.zh.md)** — 创新点、实现原理、实测基线、路线图。
 >
-> **Requires:** Node ≥ 20, `ffmpeg`/`ffprobe` on `PATH`. No other runtime dependencies.
+> **Requires:** Node ≥ 20. `ffmpeg`/`ffprobe` resolve from `$DSH_HOME/bin` first, then `PATH`
+> (`DSH_FFMPEG_PATH` / `DSH_FFPROBE_PATH` override both). No other runtime dependencies.
 
 ## Quick start
 
@@ -191,8 +192,9 @@ starting DSH; `--check` reports whether resolution will work.
 
 After changing this package, re-run the script and restart again (the copy is a snapshot).
 
-The tool shows up as `video_storyboard`. Prerequisites: `ffmpeg`/`ffprobe` on `PATH`
-(or `DSH_FFMPEG_PATH` / `DSH_FFPROBE_PATH`).
+The tool shows up as `video_storyboard`. Media binaries resolve from `$DSH_HOME/bin`
+first, then `PATH` (or `DSH_FFMPEG_PATH` / `DSH_FFPROBE_PATH`). To keep the dependency
+inside DSH, place `ffmpeg`/`ffprobe` in `$DSH_HOME/bin` — no global install needed.
 
 **The schema is verified against the host, not against a copy of it.** `test/contract.test.mjs`
 imports the *real* `defineTool` / `validateArgs` from the installed `@deepseek-ai/dsh-tools` and
