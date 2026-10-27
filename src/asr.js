@@ -295,7 +295,11 @@ export async function transcribeLong(options = {}) {
     language = part.language ?? language;
     all.push(...part.segments);
   }
-  return { segments: mergeSegments(all), model, language, chunks: windows.length };
+  // 多窗口时每段都可能因为「没配 key / 纯音乐」返回 null；若这里仍返回非 null 的空壳，
+  // 上层会把它当成"有 ASR、只是没听清"，在清单里写出 transcript="asr" 并附一句"可能听错"，
+  // 模型于是以为自己拿到了台词依据。empty 标记让上层能区分「跑了但没结果」。
+  const merged = mergeSegments(all);
+  return { segments: merged, model, language, chunks: windows.length, empty: merged.length === 0 };
 }
 
 /**
