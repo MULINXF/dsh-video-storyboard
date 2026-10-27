@@ -56,7 +56,7 @@ export function storyboardToolSpec() {
       },
       sheets: {
         type: 'integer',
-        description: 'How many images to return, 1-4 (default: auto). Each extra image costs another 384 tokens.',
+        description: 'How many images to return, 1-4 (default: auto). Each extra image costs another ~384 tokens in DSH (host-dependent).',
       },
       pick: {
         type: 'string',
@@ -121,6 +121,11 @@ export function storyboardToolSpec() {
         description: 'Return only the text index (respecting cellRange) — no image is produced and no ' +
           'frame is decoded. Use it to page through a long film after the first visual pass; the scan is cached.',
       },
+      sourceHash: {
+        type: 'boolean',
+        description: 'Also compute the source file SHA-256 and put it in the manifest. Off by default: ' +
+          'it reads the whole file, so on a multi-GB video it adds real I/O.',
+      },
     },
     output: {
       schema: {
@@ -165,7 +170,7 @@ export function zoomToolSpec() {
       'subtitles and on-screen text become legible — things a 16-cell overview cannot show.',
       '',
       'Keep the window short (a few seconds to a minute). For another wide pass use video_storyboard.',
-      'Costs one image (~384 tokens), like any other tool result with one image.',
+      'Costs one image (~384 tokens in DSH, host-dependent), like any other tool result with one image.',
     ].join('\n'),
     parameters: {
       input: {
@@ -213,6 +218,10 @@ export function zoomToolSpec() {
       allowAnonymous: {
         type: 'boolean',
         description: 'Anonymous reading is always allowed. Set this to true to suppress the warning note.',
+      },
+      sourceHash: {
+        type: 'boolean',
+        description: 'Also compute the source file SHA-256 and put it in the manifest. Off by default.',
       },
     },
     output: {
@@ -316,6 +325,9 @@ export function validateToolArgs(args) {
   if (args.textOnly !== undefined && typeof args.textOnly !== 'boolean') {
     problems.push('textOnly must be a boolean');
   }
+  if (args.sourceHash !== undefined && typeof args.sourceHash !== 'boolean') {
+    problems.push('sourceHash must be a boolean');
+  }
   if (args.detail !== undefined && !['low', 'med', 'high'].includes(args.detail)) {
     problems.push("detail must be 'low', 'med' or 'high'");
   }
@@ -358,6 +370,9 @@ export function validateZoomArgs(args) {
   }
   if (args.allowAnonymous !== undefined && typeof args.allowAnonymous !== 'boolean') {
     problems.push('allowAnonymous must be a boolean');
+  }
+  if (args.sourceHash !== undefined && typeof args.sourceHash !== 'boolean') {
+    problems.push('sourceHash must be a boolean');
   }
   return problems;
 }

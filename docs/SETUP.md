@@ -9,7 +9,7 @@
 
 | Dependency | Local files | URL mode | Notes |
 |---|---|---|---|
-| **ffmpeg** | ✅ required | ✅ required | 7.0+, on `PATH` or via `DSH_FFMPEG_PATH` |
+| **ffmpeg** | ✅ required | ✅ required | 7.0+, on `PATH`, under `$DSH_HOME/tools/ffmpeg/bin`, or via `DSH_FFMPEG_PATH` |
 | **yt-dlp** | — | ✅ required | Resolves direct URLs and pulls the low-res copy. **Never bundled.** |
 | **cookies.txt** | — | ✅ required | Login is required by default (see §3) |
 
@@ -144,7 +144,7 @@ it mark `degraded` and add a note.
 | `DSH_VIDEO_COOKIES` | none | Path to cookies.txt |
 | `DSH_VIDEO_MEDIA_DIR` | `os.tmpdir()/dsh-video-storyboard/media` | Where the low-res copy is cached |
 | `DSH_VIDEO_MEDIA_MAX_MB` | `300` | Media cache cap; evicts oldest by mtime |
-| `DSH_FFMPEG_PATH` | `ffmpeg` | ffmpeg path (unchanged from 0.2.x) |
+| `DSH_FFMPEG_PATH` | auto-discovered | ffmpeg path; explicit value wins over `DSH_HOME`/PATH lookup |
 
 ---
 

@@ -10,10 +10,11 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
+import { DEFAULT_FFMPEG, DEFAULT_FFPROBE, describeMediaSearch } from './binaries.js';
+
 const run = promisify(execFile);
 
-export const DEFAULT_FFMPEG = process.env.DSH_FFMPEG_PATH || process.env.FFMPEG_PATH || 'ffmpeg';
-export const DEFAULT_FFPROBE = process.env.DSH_FFPROBE_PATH || process.env.FFPROBE_PATH || 'ffprobe';
+export { DEFAULT_FFMPEG, DEFAULT_FFPROBE };
 
 /** "25/1" | "30000/1001" → number | null */
 export function parseRational(value) {
@@ -74,11 +75,19 @@ export function uprightSize(codedWidth, codedHeight, rotation) {
 export const endEdge = (fps) => (fps > 0 ? 0.5 / fps : 0.02);
 
 export async function probeVideo(input, { ffprobePath = DEFAULT_FFPROBE } = {}) {
-  const { stdout } = await run(
-    ffprobePath,
-    ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', input],
-    { maxBuffer: 8 * 1024 * 1024 },
-  );
+  let stdout;
+  try {
+    ({ stdout } = await run(
+      ffprobePath,
+      ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', input],
+      { maxBuffer: 8 * 1024 * 1024 },
+    ));
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      throw new Error(describeMediaSearch('ffprobe'));
+    }
+    throw error;
+  }
   let parsed;
   try {
     parsed = JSON.parse(stdout);

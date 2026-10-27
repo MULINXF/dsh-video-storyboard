@@ -85,6 +85,32 @@ test('cellRange 越界时被夹到有效范围', () => {
   assert.match(text, /cells="60-64 of 64"/);
 });
 
+test('清单头部带 cell/tokens/ffmpeg/sha256 与 plan 输入', () => {
+  const r = makeResult({ cells: 16 });
+  r.sheets[0].cellW = 559;
+  r.sheets[0].cellH = 248;
+  r.provenance = { ffmpeg: '6.1.1-essentials_build', sha256: 'abc123' };
+  r.plan = {
+    ...r.plan,
+    auto: true,
+    inputs: {
+      duration: 100, scanThreshold: 40, meanLufs: -14.2, speechRate: 0.3,
+      motion: 7.9, cuts: 12, hasSubtitle: true,
+    },
+    thresholds: { musicLufs: -18, musicSpeechRate: 1, speechRateCut: 3 },
+  };
+  const text = formatManifest(r, { maxChars: 200_000 });
+  assert.match(text, /cell="559x248"/);
+  assert.match(text, /tokens="384 \(DSH estimate\)"/);
+  assert.match(text, /ffmpeg="6\.1\.1-essentials_build"/);
+  assert.match(text, /sha256="abc123"/);
+  assert.match(text, /plan: auto 16 cells/);
+  assert.match(text, /meanLufs=-14\.2 LUFS/);
+  assert.match(text, /speechRate=0\.3 chars\/s/);
+  assert.match(text, /cuts=12/);
+  assert.match(text, /thresholds musicLufs>-18, musicSpeechRate<1, speechRateCut>3/);
+});
+
 test('textOnly 结果：没有图，但格与台词齐全', () => {
   const base = makeResult();
   const textOnly = {

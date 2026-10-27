@@ -38,7 +38,7 @@ test('e2e: runStoryboard 出一张图 + 完整清单', async (t) => {
   t.after(() => rm(dir, { recursive: true, force: true }));
   const file = await makeFixture(dir);
 
-  const r = await runStoryboard({ input: file, cells: 4, pick: 'sharp' });
+  const r = await runStoryboard({ input: file, cells: 4, pick: 'sharp', sourceHash: true });
   assert.equal(r.sheets.length, 1);
   const sheet = r.sheets[0];
   assert.equal(sheet.cols * sheet.rows, 4);
@@ -53,6 +53,13 @@ test('e2e: runStoryboard 出一张图 + 完整清单', async (t) => {
   }
   assert.equal(sheet.cells[0].t_start, 0);
   assert.ok(Math.abs(r.window.to - 6) < 0.2);
+
+  const text = formatManifest(r);
+  assert.match(text, new RegExp(`cell="${sheet.cellW}x${sheet.cellH}"`));
+  assert.match(text, /tokens="384 \(DSH estimate\)"/);
+  assert.match(text, /ffmpeg="[^"]+"/);
+  assert.match(text, /sha256="[0-9a-f]{64}"/);
+  assert.match(text, /plan: explicit 4 cells/);
 });
 
 test('e2e: 交给附件的必须是真 PNG（裸 RGB 会被判 malformed）', async (t) => {
@@ -257,9 +264,28 @@ test('transcriptFile: 给了转写就不跑 ASR，没有音轨也能用', { skip
     const r = await runStoryboard({ input: file, cells: 4, transcriptFile: srt, cache: false });
     assert.equal(r.transcript.source, 'file');
     assert.equal(r.transcript.segments, 2);
+    assert.equal(r.transcript.chars, 11);
     assert.equal(r.transcript.model, 'file:srt');
     // 关键：fixture 没有音轨，旧逻辑会走 no-audio；显式文件必须压过它
     assert.match(formatManifest(r), /来自文件的第一句/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('transcriptFile: 窗口统计只算窗口内的台词，不把整片字数除以窗口', { skip: !hasFfmpeg }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'tf-window-'));
+  try {
+    const file = await makeFixture(dir);
+    const srt = join(dir, 'long.srt');
+    await writeFile(srt, '1\n00:00:00,000 --> 00:00:02,000\n' + '甲'.repeat(60) + '\n\n' +
+      '2\n00:00:02,000 --> 00:00:04,000\n甲乙丙丁\n', 'utf8');
+    const r = await runStoryboard({
+      input: file, from: 2, to: 4, cells: 4, transcriptFile: srt, cache: false,
+    });
+    assert.equal(r.transcript.segments, 1, '窗口内只应剩第二段');
+    assert.equal(r.transcript.chars, 4, '不能把窗口外的 60 字算进来');
+    assert.equal(r.transcript.charsPerSec, 2, '4 字 / 2 秒');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
