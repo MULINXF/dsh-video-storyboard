@@ -1,0 +1,14 @@
+# .mailmap — 把提交署名映射到真正的 GitHub 账号
+#
+# 为什么需要：GitHub 的 Contributors 列表是按 **commit 的 author email** 找账号的。
+# 如果贡献者的本地 git 身份是宿主占位地址（例如 DSH agent 的 agent@dsh.local），
+# 他的提交就落不到任何账号上，PR 合了、代码进了历史，贡献图里却没有他。
+#
+# 这里把 issue #1 / PR #2 的占位署名映射到 ggfgfgf-on 的 noreply 地址。
+# 长期解法仍然是他自己设置：
+#     git config user.name  ggfgfgf-on
+#     git config user.email 241716955+ggfgfgf-on@users.noreply.github.com
+#
+# 语法： <正确的邮箱> <提交里的邮箱>
+
+<241716955+ggfgfgf-on@users.noreply.github.com> <agent@dsh.local>
