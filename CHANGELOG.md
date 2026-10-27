@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+**Removed `burn: "index+time"`.** It was in the parameter enum, in the tool description and in the docs, and
+it did nothing — no code ever drew a timecode. A public option that silently behaves like another option is
+worse than no option. Timecodes stay in the text (0.01 s precision); burning them into pixels costs frame
+area and dies first under compression. Also from issue #1.
+
 **Two bugs from issue #1 (ggfgfgf-on) that I had wrongly declared "already absorbed".**
 
 - **Windows shorter than 0.4 s crashed.** `segmentsFromCuts` dropped every segment below `minLen`, so a

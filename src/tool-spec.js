@@ -63,8 +63,10 @@ export function storyboardToolSpec() {
       },
       burn: {
         type: 'string',
-        enum: ['index', 'index+time', 'none'],
-        description: 'What to burn into each cell. Default "index". "index+time" adds a timestamp but is hard to read at small cell sizes.',
+        enum: ['index', 'none'],
+        description: 'What to burn into each cell. Default "index" (the cell number, so the model can cite ' +
+          '"cell 5"). Timecodes are never burned in - they live in the text at 0.01 s precision, and pixels ' +
+          'spent on a timecode are pixels lost from the frame.',
       },
       minGap: {
         type: 'number',
@@ -155,7 +157,7 @@ export function zoomToolSpec() {
       },
       burn: {
         type: 'string',
-        enum: ['index', 'index+time', 'none'],
+        enum: ['index', 'none'],
         description: 'What to burn into each cell. Default "index".',
       },
       transcript: {

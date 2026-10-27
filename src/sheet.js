@@ -146,7 +146,7 @@ export function drawPadding(buf, width, height, x, y, cellW, cellH) {
 /**
  * 把若干帧（rawvideo rgb24）拼成一张画布。
  * @param {{frames:Array<{buffer:Buffer, index:number}|null>, cols:number, rows:number,
- *          cellAspect:number, budget?:number, gutter?:number, burn?:'index'|'none'|'index+time'}} opts
+ *          cellAspect:number, budget?:number, gutter?:number, burn?:'index'|'none'}} opts
  *   frames 顺序对应格位 1..cols*rows；null = 空位（补灰）
  * @returns {{buffer:Buffer,width:number,height:number,cellW:number,cellH:number}}
  */

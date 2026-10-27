@@ -3,7 +3,7 @@
  * storyboard — CLI 薄壳，真正的逻辑全在 src/pipeline.js（与 DSH 工具同一份实现）。
  *
  *   node bin/storyboard.mjs <video> [--cells 9] [--sheets 1] [--from 0] [--to 300]
- *                                   [--pick sharp|mid|thumb] [--burn index|index+time|none]
+ *                                   [--pick sharp|mid|thumb] [--burn index|none]
  *                                   [--threshold auto|15] [--min-gap 1.2]
  *                                   [--transcript auto|off] [--no-adaptive] [--badge 0.15]
  *                                   [--out sheet.png] [--manifest m.json] [--plan 300] [--text]

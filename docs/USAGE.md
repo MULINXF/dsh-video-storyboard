@@ -128,7 +128,7 @@ Returns duration / resolution / fps / rotation / audio / subtitles **and two rea
 | `cells` | auto | 1–16. More detail → 12/16; more clarity → 4/6 |
 | `sheets` | auto | 1–4. Each image is 384 tokens |
 | `pick` | `sharp` | change only if you want segment-mid or histogram-representative |
-| `burn` | `index` | `index+time` burns the timecode in (eats pixels, dies first under compression) |
+| `burn` | `index` | `none` turns the burned cell number off. Timecodes are never burned in — they live in the text at 0.01 s |
 | `minGap` | 1.2 | drop to 0.4 so half-second shots get their own cell |
 | `transcript` | `auto` | `off` for pure visual analysis |
 | `detail` | `med` | `low` 60 / `med` 120 / `high` 400 chars, cut on sentence boundaries |

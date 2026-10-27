@@ -22,7 +22,9 @@ import {
 } from './sheet.js';
 
 export const PICK_MODES = ['sharp', 'mid', 'thumb'];
-export const BURN_MODES = ['index', 'index+time', 'none'];
+// 只有两种：时间码不烧进画面 —— 它占像素、压缩后先糊，而清单里已经有 0.01 秒精度的时间。
+// （历史上 `index+time` 在参数表里但从没实现过，等于一个会静默失效的选项。）
+export const BURN_MODES = ['index', 'none'];
 
 /**
  * @param {object} opts
@@ -34,7 +36,7 @@ export const BURN_MODES = ['index', 'index+time', 'none'];
  * @param {number|'auto'} [opts.threshold]
  * @param {number} [opts.minGap] 采样最小间隔
  * @param {'sharp'|'mid'|'thumb'} [opts.pick]
- * @param {'index'|'index+time'|'none'} [opts.burn]
+ * @param {'index'|'none'} [opts.burn]
  * @param {number} [opts.badgeRatio]
  * @param {number} [opts.budget] 单图像素预算
  * @param {string} [opts.ffmpegPath]
