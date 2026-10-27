@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+**Pixel aspect ratio and VFR frame rate.** Two probe fixes taken from PR #2 (ggfgfgf-on), reimplemented
+here: `aspect` was computed as coded width / coded height, which is wrong for non-square pixels (a
+1440×1080 DVD-era file with SAR 4:3 *displays* as 16:9 — our grid would have squashed every face). It now
+uses `width × SAR / height`, inverted when the stream is rotated 90°. And `r_frame_rate` is ignored when it
+exceeds 240 fps (a common VFR timebase artefact), falling back to `avg_frame_rate` — our windowed scan
+divides by fps to get durations, so a wrong rate moves every cell boundary.
+
 **Merged PR #3 (dugu951): an empty ASR result no longer claims to be a transcript.** When no ASR backend was
 configured, a long video (many chunks) was still labelled `transcript="asr"` with zero segments plus a
 "may be misheard" disclaimer — the model believed it had a transcript when it had nothing.

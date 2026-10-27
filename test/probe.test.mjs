@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { endEdge, normalizeRotation, parseRational, uprightSize } from '../src/probe.js';
+import {
+  displayAspect, endEdge, normalizeRotation, parseRational, parseSar, uprightSize,
+} from '../src/probe.js';
 
 test('parseRational: 常见帧率字符串', () => {
   assert.equal(parseRational('25/1'), 25);
@@ -32,4 +34,25 @@ test('endEdge: 帧率越高避让越小，且永远大于 0', () => {
   assert.ok(endEdge(25) > 0 && endEdge(25) < 0.05);
   assert.ok(endEdge(60) < endEdge(25));
   assert.ok(endEdge(0) > 0, 'fps 缺失时也要有兜底');
+});
+
+/* ---------------------------------------------------------------- 像素宽高比 */
+
+test('displayAspect: 方像素时等于编码比例', () => {
+  assert.ok(Math.abs(displayAspect(1920, 1080, 1) - 16 / 9) < 1e-9);
+});
+
+test('displayAspect: 非方像素按 SAR 折算（1440×1080 + 4:3 = 16:9 显示）', () => {
+  assert.ok(Math.abs(displayAspect(1440, 1080, 4 / 3) - 16 / 9) < 1e-3);
+});
+
+test('displayAspect: 转 90° 后取倒数（竖拍不该被当成横的）', () => {
+  assert.ok(Math.abs(displayAspect(1920, 1080, 1, 90) - 9 / 16) < 1e-9);
+  assert.ok(Math.abs(displayAspect(1920, 1080, 1, 270) - 9 / 16) < 1e-9);
+});
+
+test('parseSar: 0:1 与缺失都按方像素处理', () => {
+  assert.equal(parseSar('0:1'), 1);
+  assert.equal(parseSar(undefined), 1);
+  assert.equal(parseSar('4:3'), 4 / 3);
 });
