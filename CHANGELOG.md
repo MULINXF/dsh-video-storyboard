@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+**Merged PR #3 (dugu951): an empty ASR result no longer claims to be a transcript.** When no ASR backend was
+configured, a long video (many chunks) was still labelled `transcript="asr"` with zero segments plus a
+"may be misheard" disclaimer — the model believed it had a transcript when it had nothing.
+
+The fix distinguishes three cases that used to collapse into one: *never ran* (no key → no transcript line
+at all), *ran and found no speech* (`asr-empty`, with an explicit "read the pictures" hint) and *failed*
+(`asr-failed`). The contributor's version merged the first two; the split matters — telling a model "ASR
+heard nothing" when ASR never ran is its own small lie.
+
 Two things borrowed from a community PR, both about giving the model information it cannot derive on
 its own — without growing the manifest much.
 
@@ -48,7 +57,7 @@ concept PV and **141 → 139** on the talking head. Small, but it was two false 
 `video_probe` also offers the STRUCTURE/SEQUENCE menu from 8 minutes instead of 20 — a 10-minute video
 benefits from the choice as much as a feature film does.
 
-Tests 189 → **199**.
+Tests 189 → **201**.
 
 ## [0.2.2] — 2026-10-27
 

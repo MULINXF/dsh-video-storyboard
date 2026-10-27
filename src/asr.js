@@ -283,21 +283,30 @@ export async function transcribeLong(options = {}) {
   const { start = 0, end, silences = [], maxChunk = 45, ...rest } = options;
   if (!(end > start)) throw new RangeError('end must be greater than start');
   const windows = chunkWindows({ start, end, silences, maxChunk });
-  if (windows.length === 1) return transcribe({ ...rest, start, end });
+  // 单窗口：transcribe 自己是 null 就 null，是空段就空段 —— 下面统一补 `empty` 标记
+  if (windows.length === 1) {
+    const only = await transcribe({ ...rest, start, end });
+    return only ? { ...only, empty: only.segments.length === 0 } : null;
+  }
 
   const all = [];
   let model = null;
   let language = null;
+  let ran = 0;                                    // 真正跑起来的片数（没配 key 时会是 0）
   for (const win of windows) {
     const part = await transcribe({ ...rest, start: win.from, end: win.to });
     if (!part) continue;
+    ran += 1;
     model = part.model ?? model;
     language = part.language ?? language;
     all.push(...part.segments);
   }
-  // 多窗口时每段都可能因为「没配 key / 纯音乐」返回 null；若这里仍返回非 null 的空壳，
-  // 上层会把它当成"有 ASR、只是没听清"，在清单里写出 transcript="asr" 并附一句"可能听错"，
-  // 模型于是以为自己拿到了台词依据。empty 标记让上层能区分「跑了但没结果」。
+  // 一片都没跑起来（没配 key）→ 返回 null，让上层走"没有 ASR"这条分支。
+  // 不能返回空壳：那样清单会写 "ASR ran and found no speech"，而实际上根本没跑。
+  if (ran === 0) return null;
+  // 多窗口时每一段都可能因为「没配 key / 纯音乐」返回 null；若这里仍返回非 null 的空壳，
+  // 上层会把空壳当成"有 ASR、只是没听清"，在清单里写 transcript="asr" 并附"可能听错"，
+  // 模型于是以为自己拿到了台词依据。`empty` 让上层能区分「跑了但没结果」。
   const merged = mergeSegments(all);
   return { segments: merged, model, language, chunks: windows.length, empty: merged.length === 0 };
 }

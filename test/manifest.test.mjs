@@ -189,3 +189,12 @@ test('formatManifest: 有快剪爆发时报出区间与镜头数', () => {
   assert.match(text, /fast cuts: 00:42\.80-01:04\.80 \(22 shots\)/);
   assert.match(text, /minGap: 0\.4/);
 });
+
+test('formatManifest: asr-empty 说明"没有台词"而不是"字幕坏了"', () => {
+  const r = makeResult({ cells: 4 });
+  r.transcript = { source: 'asr-empty', segments: 0, model: 'paraformer-zh' };
+  const text = formatManifest(r, { maxChars: 200_000 });
+  assert.match(text, /ASR ran and found no speech/);
+  assert.match(text, /different from a subtitle-track failure/);
+  assert.ok(!/may be misheard/.test(text), '没有台词时不该出现"可能听错"的免责句');
+});

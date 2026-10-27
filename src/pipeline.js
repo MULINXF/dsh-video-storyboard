@@ -131,7 +131,8 @@ export async function runStoryboard(opts) {
           transcriptInfo = {
             ...(replaced > 0 ? { termsFixed: replaced } : {}),
             ...asr,
-            source: asr.empty ? 'asr-empty' : 'asr',
+            // 空结果（没配 key / 整片纯音乐）不该自称 asr —— 见 PR #3
+            source: asr.empty || fixed.length === 0 ? 'asr-empty' : 'asr',
             segments: fixed,
             suspect: dropped.length,
             suspectDetail: dropped.slice(0, 3).map((d) => ({
@@ -627,12 +628,12 @@ export function formatManifest(result, {
         (result.transcript.suspect > 3 ? ', …' : ''));
     }
   }
-  if (result.transcript?.source === 'asr-empty') {
-    lines.push('transcript: ASR produced no speech (this is not a subtitle track failure). ' +
-      'Treat the video as having no dialogue — rely on the pictures and the audio strip.');
-  }
   if (result.transcript?.source === 'asr-failed') {
     lines.push(`transcript unavailable: ${result.transcript.error ?? 'ASR call failed'}`);
+  }
+  if (result.transcript?.source === 'asr-empty') {
+    lines.push('transcript: ASR ran and found no speech here — treat this as a video with no dialogue ' +
+      '(this is different from a subtitle-track failure). Read the pictures and the audio strip.');
   }
   if (result.transcript?.source === 'no-audio') lines.push('no audio track: grid is visual only');
   lines.push(`total ${picked.length} of ${total} cells shown` +
