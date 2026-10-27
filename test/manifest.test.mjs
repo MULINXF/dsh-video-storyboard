@@ -7,7 +7,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DETAIL_CHARS, countTextInSilence, formatManifest, truncateAtSentence } from '../src/pipeline.js';
+import {
+  DETAIL_CHARS, countTextInSilence, formatManifest, truncateAtSentence, withSheetSuffix,
+} from '../src/pipeline.js';
 
 /** 造一个 64 格的 result（每格 300 字），不跑 ffmpeg */
 function makeResult({ cells = 64, textLen = 300 } = {}) {
@@ -197,4 +199,16 @@ test('formatManifest: asr-empty 说明"没有台词"而不是"字幕坏了"', ()
   assert.match(text, /ASR ran and found no speech/);
   assert.match(text, /different from a subtitle-track failure/);
   assert.ok(!/may be misheard/.test(text), '没有台词时不该出现"可能听错"的免责句');
+});
+
+/* ---------------------------------------------------------------- 多图落盘命名 */
+
+test('withSheetSuffix: 任何扩展名都不会互相覆盖', () => {
+  assert.equal(withSheetSuffix('out.png', 2), 'out-2.png');
+  assert.equal(withSheetSuffix('out.jpg', 2), 'out-2.jpg');
+  assert.equal(withSheetSuffix('D:/frames/final.JPEG', 3), 'D:/frames/final-3.JPEG');
+});
+
+test('withSheetSuffix: 没有扩展名时直接追加', () => {
+  assert.equal(withSheetSuffix('out', 2), 'out-2');
 });

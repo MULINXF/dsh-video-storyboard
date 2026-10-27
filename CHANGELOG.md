@@ -13,6 +13,15 @@ it did nothing — no code ever drew a timecode. A public option that silently b
 worse than no option. Timecodes stay in the text (0.01 s precision); burning them into pixels costs frame
 area and dies first under compression. Also from issue #1.
 
+**Three more from issue #1, all small and all real.**
+
+- `--badge 0` did not turn the burned index off: `Number(opt.badge) || 0.15` treats 0 as "unset", so asking for
+  no badge silently gave the default size.
+- Multi-sheet output overwrote itself for any extension other than `.png`: the name was built with
+  `outPath.replace(/\.png$/i, ...)`, which is a no-op for `out.jpg`, so every sheet wrote to the same path.
+- `npm run check` ran a **bash** `for` loop; on Windows npm uses cmd.exe, so the check had never worked there.
+  Replaced with `scripts/check-syntax.mjs` (20 files, cross-platform).
+
 **Two bugs from issue #1 (ggfgfgf-on) that I had wrongly declared "already absorbed".**
 
 - **Windows shorter than 0.4 s crashed.** `segmentsFromCuts` dropped every segment below `minLen`, so a

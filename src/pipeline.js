@@ -365,13 +365,23 @@ export async function runStoryboard(opts) {
 export async function saveStoryboards(result, outPath, { ffmpegPath = DEFAULT_FFMPEG, quality } = {}) {
   const paths = [];
   for (const s of result.sheets) {
+    // 多张图时要保证文件名唯一：原来只认 `.png` 后缀，
+    // 传 `out.jpg` 时替换不生效 → 每张都写到同一个路径，最后只剩最后一张。
     const path = result.sheets.length === 1
       ? outPath
-      : outPath.replace(/\.png$/i, `-${s.sheet}.png`);
+      : withSheetSuffix(outPath, s.sheet);
     await encodeRaw(s.buffer, s.width, s.height, path, { ffmpegPath, quality });
     paths.push(path);
   }
   return paths;
+}
+
+/** `out.png` + 2 → `out-2.png`；`out.jpg` + 2 → `out-2.jpg`（任何扩展名都成立） */
+export function withSheetSuffix(outPath, sheet) {
+  const m = /^(.*?)(\.[^./\\]+)?$/.exec(String(outPath));
+  const base = m?.[1] ?? outPath;
+  const ext = m?.[2] ?? '';
+  return `${base}-${sheet}${ext}`;
 }
 
 const tc = (t) => {

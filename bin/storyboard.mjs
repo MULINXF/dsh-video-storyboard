@@ -114,7 +114,9 @@ const r = await runStoryboard({
   minGap: Number(opt['min-gap']) || 0,
   pick: String(opt.pick),
   burn: String(opt.burn),
-  badgeRatio: Number(opt.badge) || 0.15,
+  // `--badge 0` 必须真的等于 0：`Number(0) || 0.15` 会把它变成 0.15，
+  // 于是"关掉烧字"变成了"用默认大小烧"。
+  badgeRatio: opt.badge === undefined ? 0.15 : Number(opt.badge),
   transcript: String(opt.transcript),
   adaptive,
   textOnly,
