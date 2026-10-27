@@ -1,100 +1,100 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.0] — 2026-10-28
 
-**Credits for the people who found these.** `CREDITS.md` now has a contributors table: @dugu951 (PR #3),
-@ggfgfgf-on (issue #1 — four of the ten items landed here), @canyueY (enrichment + memory direction) and
-@xingyueDanYang (issue #4, not yet evaluated). PR #2 is recorded as a merge (`7b6451d`) that deliberately
-keeps our tree: its branch was based on `f3b7ce4` and no longer applies, but the contribution deserves to be
-in the history rather than erased by a close-without-merge.
+**A URL is now a valid input.** Paste a Bilibili link (or anything yt-dlp supports) instead of a local
+path. Two decisions make this different from "download the video, then analyse it".
 
-**Removed `burn: "index+time"`.** It was in the parameter enum, in the tool description and in the docs, and
-it did nothing — no code ever drew a timecode. A public option that silently behaves like another option is
-worse than no option. Timecodes stay in the text (0.01 s precision); burning them into pixels costs frame
-area and dies first under compression. Also from issue #1.
+### Two-tier fetching
 
-**Three more from issue #1, all small and all real.**
+Scanning only needs structure — it gets downscaled to 64x36 — so it reads a 360p copy of the whole file
+(~7 MB per 5 min). Close-ups go back to the original stream, one frame at a time, and never touch disk.
 
-- `--badge 0` did not turn the burned index off: `Number(opt.badge) || 0.15` treats 0 as "unset", so asking for
-  no badge silently gave the default size.
-- Multi-sheet output overwrote itself for any extension other than `.png`: the name was built with
-  `outPath.replace(/\.png$/i, ...)`, which is a no-op for `out.jpg`, so every sheet wrote to the same path.
-- `npm run check` ran a **bash** `for` loop; on Windows npm uses cmd.exe, so the check had never worked there.
-  Replaced with `scripts/check-syntax.mjs` (20 files, cross-platform).
+Why the low-res copy is downloaded at all instead of streamed: `pick:"sharp"` needs 3 candidate frames
+per segment, 27 random seeks for a 9-cell grid. Local: 9.6 s. Over HTTP: 51.8 s. Seven megabytes buys
+the right to jump around. Pure streaming would have been ~3.5x slower end to end.
 
-**Two bugs from issue #1 (ggfgfgf-on) that I had wrongly declared "already absorbed".**
+### `transcriptFile` — skip ASR when the source already has captions
 
-- **Windows shorter than 0.4 s crashed.** `segmentsFromCuts` dropped every segment below `minLen`, so a
-  0.2 s zoom returned `[]` and `fitSegments` destructured `undefined`. `video_zoom({ from: 12.0, to: 12.2 })`
-  was a straight crash. A sub-0.4 s window is one segment, and now returns one.
-- **Low-saturation pixels invented cuts.** Hue is meaningless near grey — compression noise throws it to the
-  other side of the wheel. `rgb(128,128,127) → rgb(128,127,128)`, visually identical, scored **28.3**
-  against thresholds of 12–58. The hue term is now weighted by the lower of the two saturations.
-  Measured: the talking-head clip went from **139 → 121 cuts** (−13 %), the colour-heavy PV was unchanged.
+Accepts SRT, a plain `[{start,end,text}]` array, or Bilibili's `{body:[{from,to,content}]}`, detected
+automatically. On a 90 s clip this took a run from 16.9 s to **5.1 s**. It also works on files with no
+audio track, where the old logic fell through to `no-audio`.
 
-**Pixel aspect ratio and VFR frame rate.** Two probe fixes taken from PR #2 (ggfgfgf-on), reimplemented
-here: `aspect` was computed as coded width / coded height, which is wrong for non-square pixels (a
-1440×1080 DVD-era file with SAR 4:3 *displays* as 16:9 — our grid would have squashed every face). It now
-uses `width × SAR / height`, inverted when the stream is rotated 90°. And `r_frame_rate` is ignored when it
-exceeds 240 fps (a common VFR timebase artefact), falling back to `avg_frame_rate` — our windowed scan
-divides by fps to get durations, so a wrong rate moves every cell boundary.
+### Auth: probe first, complain only when it actually matters
 
-**Merged PR #3 (dugu951): an empty ASR result no longer claims to be a transcript.** When no ASR backend was
-configured, a long video (many chunks) was still labelled `transcript="asr"` with zero segments plus a
-"may be misheard" disclaimer — the model believed it had a transcript when it had nothing.
+The first cut of this release hard-failed when no cookies were configured. Real use proved that wrong:
+`BV1BK411Q7ys` lists 360/480/720/1080 even anonymously, while `BV1fq4y1u7nC` tops out at 480p. Per-video
+and unpredictable, so refusing outright just made the agent hunt for a cookie it did not need.
 
-The fix distinguishes three cases that used to collapse into one: *never ran* (no key → no transcript line
-at all), *ran and found no speech* (`asr-empty`, with an explicit "read the pictures" hint) and *failed*
-(`asr-failed`). The contributor's version merged the first two; the split matters — telling a model "ASR
-heard nothing" when ASR never ran is its own small lie.
+Now the plugin probes first and proceeds if the source already offers the target tier; only when it
+cannot does it record `degraded` plus a one-line note. The result always carries `auth`,
+`maxAvailable` and `availableHeights`, so nothing is hidden.
 
-Two things borrowed from a community PR, both about giving the model information it cannot derive on
-its own — without growing the manifest much.
+Reading the browser's cookie jar is still not an option: Chromium 127+ stores `SESSDATA` with App-Bound
+Encryption (`v20`), which no external process can decrypt. `docs/SETUP.md` documents the file export.
 
-**`fast cuts:` line.** We already reported `cuts N` per cell and the film-wide average, but neither says
-*"this stretch is a montage"*. `findBursts` was being computed and then thrown away (it also returned a
-`shots` field that was always `undefined` — a latent bug). Now the strongest bursts are listed with their
-shot counts and an actionable next step:
+### Config moves to `~/.dsh/video.json`
 
-```
-fast cuts: 00:42.80-01:04.80 (22 shots), 01:09.00-01:13.10 (5 shots) — video_zoom({ from, to, cells: 6, minGap: 0.4 }) splits these into single shots.
+DSH Desktop cannot read environment variables set with `setx` — the ASR side already learned this the
+hard way. Precedence is now **tool argument > env var > `~/.dsh/video.json`**.
+
+```json
+{ "cookies": "D:/path/to/bili-cookies.txt", "scanHeight": 360, "zoomHeight": 1080 }
 ```
 
-Cost: +151 characters on a 9-cell run (1,344 → 1,495).
+### Source capability, measured once
 
-**`seen before:` line in `video_probe`.** The cache answers "has this stretch been computed"; it cannot
-answer "have I looked at this file, and which parts". Change the window, rename the file or come back
-tomorrow and everything is recomputed — which is exactly why an agent re-describes the same video every
-time. `src/memory.js` now appends one line per analysed window to `seen.jsonl` in the cache directory, and
-`video_probe` reports:
+A single `yt-dlp -J` (2.4 s, same cost as `-g`) returns every format, so `maxAvailable` /
+`availableHeights` are known before anything is downloaded and the zoom target is clamped to what the
+source actually has. Degradation is reported as `source-max-Np` (the video's own ceiling),
+`auth-limit` (a tier exists but this identity cannot reach it) or `fetch-degraded-Np` (the fetch
+succeeded but returned less) — three different situations that used to collapse into one vague field.
 
-```
-seen before: 2 window(s) analysed before (0-30s, 30-60s), last on 2026-10-28 00:51.
-If you already described this file, cite that instead of describing it again.
-```
+### Manifest fixes for a real misread
 
-It stores **mechanical facts only** (path, window, cells, cuts, timestamp) — never model output, so a
-previous conclusion cannot leak into a new conversation as if it were evidence.
+A model read a cell whose picture came from the cell's *end* as if it belonged to the cell's *start*,
+and shifted a whole segment 30 seconds early. Both causes were ours:
 
-**Two honesty fixes in the scanner**, both from reading a contributor's write-up rather than their code:
+- `alignCells` joined every ASR line with a space, discarding each line's own `from`. A cell spanning
+  09:38.9–10:20.5 that contained a real break at 10:09.4 looked like one continuous sentence. A
+  `[10:09.4]` marker is now inserted **at breaks only** (gap >= 1 s); stamping every line would eat a
+  quarter of the 120-character budget for nothing. Cells also carry `lines` and a `broken` flag.
+- The per-cell line never said when the frame was taken. `t_frame` was already in the data — it is now
+  rendered as `frame@01:13.59`, **only for `pick:"sharp"`** (mid is derivable; sharp's 3-candidate pick
+  is not). One line above the cells states that `frame@` is not the cell start.
 
-- the threshold is now applied with `> threshold + 1e-6` and capped to the target count. With `>=`, a
-  branch landing exactly on a quantile drags an entire cluster of tied frames in (measured: +30 % cuts on
-  one clip). On our two test clips the counts are unchanged (42 / 141) — this is a safety net, not a change.
-- **`degraded: 'motion'`**: median shot < 0.5 s *and* more than 30 % of frames above the threshold means
-  continuous camera motion being cut into pieces, not editing. The manifest then says
-  `cut count unreliable here … do not quote cuts=N as pacing`. Better to admit the number is meaningless
-  than to let a model build a story on it.
+### Not done, deliberately
 
-**Hue is now compared circularly.** `scorePair` did `Math.abs(h1 - h2)` on a 0–255 hue axis, so 0° and
-359° — one degree apart — scored as 254 apart. Any shot crossing the red/magenta boundary (neon, sunset,
-a colour-wheel transition) therefore produced a phantom cut. Measured effect: **42 → 40 cuts** on the
-concept PV and **141 → 139** on the talking head. Small, but it was two false cuts per clip for free.
+Title-card detection. Probed with `blackdetect` on two real files: 8 minutes of an anime feature
+contains 10 black spans, 9 of them 0.3–1.7 s transitions. Without footage that actually has
+chapter cards there is no way to validate a detector, and a list of 10 mostly-wrong markers costs
+characters while teaching the model to distrust the index.
 
-`video_probe` also offers the STRUCTURE/SEQUENCE menu from 8 minutes instead of 20 — a 10-minute video
-benefits from the choice as much as a feature film does.
+### New parameters
 
-Tests 189 → **201**.
+`transcriptFile`, `scanHeight` (360), `zoomHeight` (1080), `cookies`, `allowAnonymous` (now: suppress
+the warning, does not gate the fetch) — on the relevant tools.
+
+### Numbers
+
+| What | Time |
+|---|---|
+| `yt-dlp -J` (formats + metadata) | 2.4 s |
+| Download 360p, 4.5 MB | 4.5 s |
+| Scan + 9 cells (90 s clip) | 9.1 s |
+| Full run with ASR | 16.9 s |
+| Full run with `transcriptFile` | **5.1 s** |
+| 6-cell zoom re-read at 1080p | 5.3 s, 0 fallbacks |
+
+Tests 216 -> **273**. CI needs no network, no yt-dlp binary and no real cookies (a fake yt-dlp script
+covers the fetch path).
+
+### Also
+
+`docs/SETUP.md` + `SETUP.zh.md`: yt-dlp install, cookie export, environment variables, five-step
+verification, failure table. `bin/storyboard.mjs` accepts a URL plus `--cookies` / `--scan-height` /
+`--transcript-file`.
+
 
 ## [0.2.2] — 2026-10-27
 

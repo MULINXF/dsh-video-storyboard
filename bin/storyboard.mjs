@@ -13,6 +13,7 @@ import { writeFile } from 'node:fs/promises';
 import { args as parse } from './_args.mjs';
 import { probeVideo } from '../src/probe.js';
 import { planWindows } from '../src/plan.js';
+import { isHttpUrl, resolveInput } from '../src/fetch.js';
 import {
   DETAIL_CHARS, formatManifest, formatTimeline, runStoryboard, saveStoryboards,
 } from '../src/pipeline.js';
@@ -22,14 +23,38 @@ const opt = parse(process.argv.slice(2), {
   pick: 'sharp', burn: 'index', badge: 0.15, transcript: 'auto',
   out: 'storyboard.png', manifest: null, plan: 0, 'text-only': false, 'cell-range': null,
   batch: 0, detail: 'med',
+  cookies: null, 'allow-anonymous': false, 'scan-height': 360, 'zoom-height': 1080,
+  'transcript-file': null,
 });
 const input = opt._[0];
 if (!input) {
-  console.error('usage: node bin/storyboard.mjs <video> [--cells 9] [--from 0] [--to 300] ...');
+  console.error('usage: node bin/storyboard.mjs <video-or-url> [--cells 9] [--from 0] [--to 300] ...');
   process.exit(2);
 }
 
-const info = await probeVideo(input).catch((error) => {
+// 链接：先换成本地文件（本地路径原样返回）。下载一次低清，后面都是本地操作。
+const fetchOptions = {
+  cookies: opt.cookies ?? undefined,
+  allowAnonymous: opt['allow-anonymous'] === true,
+  scanHeight: Number(opt['scan-height']) || 360,
+  zoomHeight: Number(opt['zoom-height']) || 1080,
+};
+let localPath = input;
+let sourceInfo = null;
+if (isHttpUrl(input)) {
+  try {
+    const resolved = await resolveInput(input, fetchOptions);
+    localPath = resolved.path;
+    sourceInfo = resolved.source;
+    console.error(`[fetch] ${sourceInfo.cached ? 'cached' : 'downloaded'} ${(sourceInfo.bytes / 1048576).toFixed(1)}MB ` +
+      `→ ${sourceInfo.scanActual ?? '?'}p (source max ${sourceInfo.maxAvailable ?? '?'}p, auth=${sourceInfo.auth})`);
+  } catch (error) {
+    console.error(`取流失败：${error.message}`);
+    process.exit(1);
+  }
+}
+
+const info = await probeVideo(localPath).catch((error) => {
   console.error(`探测失败：${error.message}`);
   process.exit(1);
 });
@@ -60,7 +85,7 @@ if (batchStep > 0) {
     const { scanShots } = await import('../src/scan.js');
     console.log('[batch] 全片扫描切点（用于窗口对齐，可加 --no-snap 跳过）…');
     // 这一遍的切点也直接喂给每个窗口，省掉"每个窗口各扫一遍"的重复解码
-    precomputed = await scanShots({ input, fps: info.fps, threshold: 'auto' });
+    precomputed = await scanShots({ input: localPath, fps: info.fps, threshold: 'auto' });
     boundaries = precomputed.cuts.map((c) => c.t);
     console.log(`[batch] 切点 ${boundaries.length} 个（窗口内复用，不再重复扫描）`);
   }
@@ -71,7 +96,7 @@ if (batchStep > 0) {
   const t0 = Date.now();
   for (const w of planW.windows) {
     const r = await runStoryboard({
-      input, from: w.from, to: w.to, cells: 0, sheets: 0,
+      input: localPath, from: w.from, to: w.to, cells: 0, sheets: 0,
       threshold: opt.threshold === 'auto' ? 'auto' : Number(opt.threshold),
       pick: String(opt.pick), burn: String(opt.burn), transcript: String(opt.transcript),
       precomputed,
@@ -106,6 +131,8 @@ const cellRange = (() => {
 const t0 = Date.now();
 const r = await runStoryboard({
   input,
+  fetchOptions,
+  transcriptFile: opt['transcript-file'] ?? undefined,
   from: Number(opt.from) || 0,
   to: Number(opt.to) || 0,
   cells: Number(opt.cells) || 0,

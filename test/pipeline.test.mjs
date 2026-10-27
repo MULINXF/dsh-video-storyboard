@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -243,4 +243,58 @@ test('formatProbe: 长片给两种读法并标明剧透，短片不啰嗦', asyn
   assert.match(short, /one call is enough/);
   assert.ok(!/STRUCTURE/.test(short), '短片不该出现长片模板');
   assert.ok(short.split('\n').length <= 3, `短片文本应很短，实得 ${short.split('\n').length} 行`);
+});
+
+/* ---------------------------------------------------------------- 外挂转写 */
+
+test('transcriptFile: 给了转写就不跑 ASR，没有音轨也能用', { skip: !hasFfmpeg }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'tf-pipe-'));
+  try {
+    const file = await makeFixture(dir);
+    const srt = join(dir, 'a.srt');
+    await writeFile(srt, '1\n00:00:00,500 --> 00:00:02,000\n来自文件的第一句\n\n' +
+      '2\n00:00:02,000 --> 00:00:04,000\n第二句\n', 'utf8');
+    const r = await runStoryboard({ input: file, cells: 4, transcriptFile: srt, cache: false });
+    assert.equal(r.transcript.source, 'file');
+    assert.equal(r.transcript.segments, 2);
+    assert.equal(r.transcript.model, 'file:srt');
+    // 关键：fixture 没有音轨，旧逻辑会走 no-audio；显式文件必须压过它
+    assert.match(formatManifest(r), /来自文件的第一句/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('transcriptFile: 文件不存在时标 file-failed，不让整次调用失败', { skip: !hasFfmpeg }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'tf-pipe2-'));
+  try {
+    const file = await makeFixture(dir);
+    const r = await runStoryboard({
+      input: file, cells: 4, transcriptFile: join(dir, 'nope.srt'), cache: false,
+    });
+    assert.equal(r.transcript.source, 'file-failed');
+    assert.match(r.transcript.error, /ENOENT|no such file/i);
+    assert.ok(r.sheets.length > 0, '台词失败不该影响出图');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('formatRemoteProbe: 说明"什么还没下载"和下一步', async () => {
+  const { formatRemoteProbe } = await import('../src/pipeline.js');
+  const text = formatRemoteProbe({
+    url: 'https://www.bilibili.com/video/BV1xx', title: '示例', duration: 90,
+    heights: [360, 480, 720, 1080], maxHeight: 1080, auth: 'cookies',
+  });
+  assert.match(text, /available: 360p, 480p, 720p, 1080p \(max 1080p\)/);
+  assert.match(text, /nothing was downloaded yet/);
+  assert.match(text, /video_zoom then reads the original stream at 1080p/);
+});
+
+test('formatRemoteProbe: 匿名时明确警告分辨率不保证', async () => {
+  const { formatRemoteProbe } = await import('../src/pipeline.js');
+  const text = formatRemoteProbe({
+    url: 'https://x/y', title: null, duration: 10, heights: [360], maxHeight: 360, auth: 'anonymous',
+  });
+  assert.match(text, /auth: anonymous \(resolution not guaranteed\)/);
 });

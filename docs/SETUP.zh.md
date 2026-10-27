@@ -110,6 +110,27 @@ video_storyboard({ input: "...", cookies: "D:/.../bili-cookies.txt" })
 
 > 桌面版 DSH 读不到 `setx` 设的用户环境变量时，改走 `~/.dsh/asr.json` 同款文件配置思路——这一点和 ASR 的已知问题一致。
 
+### 配置文件：桌面版必须用这个，别用 setx
+
+**DSH 桌面版读不到用户 `setx` 设的环境变量**（ASR 那边已经踩过同一个坑）。你在终端里配好了
+`DSH_VIDEO_COOKIES`，插件里依然说"没有 cookie"——不是它没读，是它读不到。
+
+所以配置写进文件：
+
+```json
+// ~/.dsh/video.json
+{
+  "cookies": "D:/path/to/bili-cookies.txt",
+  "scanHeight": 360,
+  "zoomHeight": 1080
+}
+```
+
+优先级：**工具参数 > 环境变量 > `~/.dsh/video.json`**。
+
+没有 cookie 也**不会报错**了：插件先用匿名地址探一次，能拿到目标档就照常跑（很多视频匿名
+本来就有 1080p），拿不到才在结果里标 `degraded` 并给一条说明。
+
 ### 有效期
 
 `SESSDATA` 通常几个月。过期后 yt-dlp 会报 `Sign in` / `login` 相关文案，插件会识别并提示"重新导出"，不会抛原始 stderr。

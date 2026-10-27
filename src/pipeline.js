@@ -6,6 +6,8 @@
  */
 
 import { probeVideo, DEFAULT_FFMPEG, DEFAULT_FFPROBE } from './probe.js';
+import { resolveInput } from './fetch.js';
+import { loadTranscriptFile } from './transcript-file.js';
 import { scanShots } from './scan.js';
 import { fitSegments, segmentsFromCuts, totalDur } from './segments.js';
 import { bestLayout, groupByCount, suggest } from './plan.js';
@@ -21,10 +23,36 @@ import {
   addAudioStrip, composeSheet, encodeRaw, encodePngBuffer, extractFrameRaw, extractSharpest, layoutCanvas,
 } from './sheet.js';
 
-export const PICK_MODES = ['sharp', 'mid', 'thumb'];
-// 只有两种：时间码不烧进画面 —— 它占像素、压缩后先糊，而清单里已经有 0.01 秒精度的时间。
+export const PICK_MODES = ['sharp', 'mid', 'thumb'];// 只有两种：时间码不烧进画面 —— 它占像素、压缩后先糊，而清单里已经有 0.01 秒精度的时间。
 // （历史上 `index+time` 在参数表里但从没实现过，等于一个会静默失效的选项。）
 export const BURN_MODES = ['index', 'none'];
+
+/**
+ * 取一帧：有高清直链就先走远程，失败回落本地低清。
+ *
+ * **远程时把候选帧降到 1。** 一次 HTTP seek 实测 1.92 s，3 候选即使并发也要 3–4 s/格，
+ * 6 格就是 20 秒以上；而 zoom 的窗口本来就短、格间距小，段中点足够代表。
+ * 本地文件仍然用 3 候选（0.35 s/次，几乎免费，且段内可能有转场帧）。
+ */
+async function extractFrameWithFallback({ input, remote, at, dur, cellW, cellH, ffmpegPath, pick }) {
+  const grab = (src, http, candidates) => {
+    if (pick === 'sharp') {
+      return extractSharpest({ input: src, at, dur, cellW, cellH, ffmpegPath, http, candidates });
+    }
+    return extractFrameRaw({
+      input: src, at, dur, cellW, cellH, ffmpegPath, http,
+      mode: pick === 'thumb' ? 'thumb' : 'mid',
+    });
+  };
+  if (remote?.uri) {
+    try {
+      return { ...(await grab(remote.uri, remote.http, 1)), via: 'remote' };
+    } catch {
+      /* 直链过期或 CDN 抖动：不整次失败，落到本地那份低清 */
+    }
+  }
+  return { ...(await grab(input, null, 3)), via: remote?.uri ? 'local-fallback' : 'local' };
+}
 
 /**
  * @param {object} opts
@@ -45,7 +73,7 @@ export const BURN_MODES = ['index', 'none'];
  */
 export async function runStoryboard(opts) {
   const {
-    input,
+    input: inputRaw,
     from = 0,
     to,
     threshold = 'auto',
@@ -54,6 +82,9 @@ export async function runStoryboard(opts) {
     pick = 'sharp',
     burn = 'index',
     transcript = 'auto',
+    transcriptFile,
+    frameSource = null,
+    fetchOptions = null,
     audioStrip = true,
     asrMaxChunk = 45,
     cache = true,
@@ -66,9 +97,19 @@ export async function runStoryboard(opts) {
     ffprobePath = DEFAULT_FFPROBE,
     onProgress,
   } = opts;
-  if (!input) throw new Error('input is required');
+  if (!inputRaw) throw new Error('input is required');
   if (!PICK_MODES.includes(pick)) throw new RangeError(`pick must be one of ${PICK_MODES.join('/')}`);
   if (!BURN_MODES.includes(burn)) throw new RangeError(`burn must be one of ${BURN_MODES.join('/')}`);
+
+  // 链接在这里变成一份本地文件；本地路径原样返回（source 为 null）。
+  // 后面的所有阶段都只面对 input，不知道它原来是不是个 URL。
+  const resolved = await resolveInput(inputRaw, fetchOptions ?? {});
+  const input = resolved.path;
+  const sourceInfo = resolved.source;
+  // zoom 用高清直链取帧；失败要能回落到本地低清，所以这里只记"首选源"，不替换 input
+  const remoteFrame = frameSource?.uri
+    ? { uri: frameSource.uri, http: { userAgent: frameSource.userAgent, referer: frameSource.referer } }
+    : null;
 
   const info = { ...(await probeVideo(input, { ffprobePath })), path: input };
   const winStart = Math.max(0, Math.min(Number(from) || 0, Math.max(0, info.duration - 0.2)));
@@ -105,9 +146,31 @@ export async function runStoryboard(opts) {
   // （全部 90 多个事件铺上去等于把密度曲线压平），清单里也按强度排序展示。
   const allEvents = audio ? detectOnsets(audio) : [];
 
-  // ---- 台词：字幕轨优先，其次 ASR；两者都没有就静默跳过（绝不让分镜失败）
+  // ---- 台词：显式文件 > 字幕轨 > ASR；三者都没有就静默跳过（绝不让分镜失败）
   let transcriptInfo = null;
-  if (transcript !== 'off' && info.hasAudio) {
+  if (transcriptFile) {
+    // 显式给了转写就只用它：不查字幕轨、不跑 ASR。
+    // 接 B 站时这一步最省 —— 字幕本来就有，没必要再识别一遍（10 分钟口播省 60–120 秒）。
+    // 也**不跑幻觉过滤**：那是给 ASR 兜底的，用户递进来的文件按可信处理。
+    try {
+      const loaded = await loadTranscriptFile(transcriptFile);
+      const { segments: fixed, replaced } = applyTermMap(loaded.segments, resolveAsrConfig().terms);
+      transcriptInfo = {
+        ...(replaced > 0 ? { termsFixed: replaced } : {}),
+        source: fixed.length > 0 ? 'file' : 'file-empty',
+        model: `file:${loaded.format}`,
+        segments: fixed,
+        suspect: 0,
+        suspectDetail: [],
+      };
+    } catch (error) {
+      transcriptInfo = {
+        segments: [],
+        source: 'file-failed',
+        error: String(error?.message ?? error).slice(0, 300),
+      };
+    }
+  } else if (transcript !== 'off' && info.hasAudio) {
     const subtitle = info.hasSubtitle
       ? await extractSubtitleTrack({ input, ffmpegPath })
       : null;
@@ -250,12 +313,14 @@ export async function runStoryboard(opts) {
       sheets: [],
       cells: cellsMeta,
       textOnly: true,
+      ...(sourceInfo ? { source: sourceInfo } : {}),
       totalDuration: +cellRanges.reduce((n2, r) => n2 + (r.to - r.from), 0).toFixed(3),
     };
   }
 
   const out = [];
   let index = 0;
+  let fallbacks = 0;
   for (const [si, group] of groups.entries()) {
     if (group.length === 0) continue;
     const { cols, rows } = bestLayout(Math.max(1, group.length), info.aspect);
@@ -268,12 +333,10 @@ export async function runStoryboard(opts) {
     const cellMeta = [];
     for (const [gi, { from: a, to: b }] of group.entries()) {
       index += 1;
-      const frame = pick === 'sharp'
-        ? await extractSharpest({ input, at: a, dur: b - a, cellW, cellH, ffmpegPath })
-        : await extractFrameRaw({
-          input, at: a, dur: b - a, cellW, cellH, ffmpegPath,
-          mode: pick === 'thumb' ? 'thumb' : 'mid',
-        });
+      const frame = await extractFrameWithFallback({
+        input, remote: remoteFrame, at: a, dur: b - a, cellW, cellH, ffmpegPath, pick,
+      });
+      if (frame.via === 'local-fallback') fallbacks += 1;
       frames.push({ buffer: frame.buffer, index });
       const text = aligned[gi] ?? null;
       // 这一格里切了几刀 —— 快闪蒙太奇的"速度"就是这个数字，模型不用自己数刻度
@@ -326,6 +389,10 @@ export async function runStoryboard(opts) {
     threshold: scan.threshold,
     ...(scan.degraded ? { degraded: scan.degraded } : {}),
     cached: Boolean(scan.cached),
+    // 链接来源的元信息（本地文件时没有这一段）。直链不在里面，那是临时凭证。
+    ...(sourceInfo ? { source: sourceInfo } : {}),
+    // 有高清直链却有格子落了回来 —— 要报，否则"这格怎么这么糊"没有解释
+    ...(fallbacks > 0 ? { frameFallbacks: fallbacks } : {}),
     audio: stripAudio
       ? {
         ...stripAudio,
@@ -464,6 +531,29 @@ export async function formatProbe(info) {
   return lines.join('\n');
 }
 
+/**
+ * 链接版的 probe 清单。和本地版的关键差别：**什么都没下载**，所以要说清楚"下一步会发生什么"，
+ * 否则模型会以为已经看过这条视频了。
+ */
+export function formatRemoteProbe(remote) {
+  const lines = [`link: ${remote.url}`];
+  if (remote.title) lines.push(`title: ${remote.title}`);
+  if (Number.isFinite(remote.duration)) lines.push(`duration: ${remote.duration.toFixed(2)}s`);
+  lines.push(remote.heights?.length
+    ? `available: ${remote.heights.map((h) => `${h}p`).join(', ')} (max ${remote.maxHeight}p)`
+    : 'available: no video formats reported');
+  lines.push(`auth: ${remote.auth}${remote.auth === 'anonymous' ? ' (resolution not guaranteed)' : ''}`);
+
+  const dur = Number(remote.duration) || 0;
+  if (dur > 1200) {
+    lines.push(`note: ${Math.round(dur / 60)} min long — read it in windows (from/to) instead of one pass.`);
+  }
+  lines.push('nothing was downloaded yet. video_storyboard with this link downloads a low-res copy ' +
+    'once (fast, and cached afterwards); video_zoom then reads the original stream at ' +
+    `${remote.maxHeight ?? 1080}p for close-ups.`);
+  return lines.join('\n');
+}
+
 /** 三档台词预算（字符）：low 只判断"这段在讲什么"，high 要能引用原话 */
 export const DETAIL_CHARS = { low: 60, med: 120, high: 400 };
 
@@ -569,6 +659,38 @@ export function formatManifest(result, {
     lines.push('footer strip shares the timeline: teal bars = loudness (taller = louder), ' +
       'grey blocks = silence, yellow ticks = cut points.');
   }
+  // 这一句专治"把格的起点当画面时刻"：标题板常常出现在格的中后段，
+  // 不给 frame@ 的话，模型会以为格首就是标题板，整段判断提前几十秒。
+  if (plan.pick === 'sharp' && picked.some((c) => Number.isFinite(c.t_frame))) {
+    lines.push('frame@ = the exact moment the cell\'s picture was taken (sharpest of 3 candidates), ' +
+      'which is NOT the cell start — a title card showing at frame@ belongs to a cell that begins earlier.');
+  }
+  if (picked.some((c) => c.broken)) {
+    lines.push('a [m:ss.s] marker inside a cell means the speech breaks there: that cell covers two ' +
+      'separate statements, so do not treat the cell start as the start of the new topic.');
+  }
+  // 链接来源：模型必须知道"我看的是一份下载副本，而且只有 360p"。
+  // 不说的话，它会把"这格字看不清"归因成视频本身糊，而不是"扫描用的是低清版、细看要 zoom"。
+  if (result.source) {
+    const s = result.source;
+    lines.push(`source: ${s.url} (auth=${s.auth}${s.cached ? ', cached' : ''}); ` +
+      `scanned at ${s.scanActual ?? s.scanHeight}p` +
+      (s.maxAvailable ? `, source max ${s.maxAvailable}p` : '') +
+      (s.zoomTarget ? `; video_zoom reads ${s.zoomTarget}p from the original stream` : '') + '.');
+    if (Array.isArray(s.degraded) && s.degraded.length > 0) {
+      const cap = s.maxAvailable ? `${s.maxAvailable}p` : 'a lower tier';
+      lines.push(`source limit: this video tops out at ${cap} (${s.degraded.join(', ')}) — ` +
+        'that is the source ceiling, not a fetch failure, so asking for more will not help.');
+    }
+    if (s.auth === 'anonymous') {
+      lines.push('warning: scanned anonymously, so the resolution was not guaranteed. ' +
+        'Configure cookies to get a predictable source tier.');
+    }
+  }
+  if (result.frameFallbacks) {
+    lines.push(`${result.frameFallbacks} cell(s) fell back to the low-resolution copy ` +
+      '(direct URL expired or the CDN hiccuped) — those cells are softer than the rest.');
+  }
   // 切点数字不可信时必须说出来 —— 否则模型会拿 cuts=N 当节奏依据
   if (result.degraded === 'motion') {
     lines.push('cut count unreliable here: median shot under 0.5s with many frames above the threshold — ' +
@@ -611,7 +733,11 @@ export function formatManifest(result, {
       : '';
     const text = truncateAtSentence(c.text, maxCellChars);
     // sharp 只留在 JSON 清单里：给模型一个 "479.7" 它无法判断好坏，纯占字符
+    // frame@ 只在 pick='sharp' 时给：mid 的取帧时刻就是格中点，模型自己能算，
+    // 而 sharp 是"3 个候选里选最锐的那个"，**推不出来** —— 少了它就等于暗示"画面在格首"。
+    const showFrame = plan.pick === 'sharp' && Number.isFinite(c.t_frame);
     const head = `cell ${c.i}${where} = ${tc(c.t_start)}-${tc(c.t_end)}` +
+      (showFrame ? ` frame@${tc(c.t_frame)}` : '') +
       (c.cuts ? `  cuts ${c.cuts}` : '');
     const body = text ? `${head}\n    "${text}"` : head;
     if (used + body.length + 1 > maxChars) { stoppedAt = c.i - 1; break; }

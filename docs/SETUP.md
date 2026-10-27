@@ -107,6 +107,29 @@ setx DSH_VIDEO_COOKIES "D:\path\to\bili-cookies.txt"
 video_storyboard({ input: "...", cookies: "D:/path/to/bili-cookies.txt" })
 ```
 
+### Config file — on Desktop, use this instead of setx
+
+**DSH Desktop cannot read environment variables set with `setx`** (the ASR side already hit the same
+wall). You can export `DSH_VIDEO_COOKIES` in a terminal and the plugin will still report "no cookies" —
+not because it ignores it, but because it never sees it.
+
+So configure through a file:
+
+```json
+// ~/.dsh/video.json
+{
+  "cookies": "D:/path/to/bili-cookies.txt",
+  "scanHeight": 360,
+  "zoomHeight": 1080
+}
+```
+
+Precedence: **tool argument > environment variable > `~/.dsh/video.json`**.
+
+A missing cookie no longer raises an error: the plugin probes anonymously first and proceeds if the
+source already offers the target tier (plenty of videos do, even anonymously). Only when it cannot does
+it mark `degraded` and add a note.
+
 ### Expiry
 
 `SESSDATA` typically lasts a few months. When it lapses yt-dlp reports a `Sign in` / `login` message; the plugin recognises it and tells you to re-export instead of dumping raw stderr.

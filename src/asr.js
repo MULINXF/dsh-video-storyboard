@@ -206,16 +206,52 @@ export async function transcribe({
  * 把台词按时间重叠贴到每一格上。
  * 一句跨两格时两边都保留（宁可重复，也别让某一格"没话说"）。
  */
+/** `10:09.4` —— 内联时间戳用，比 `00:10:09.40` 省一半字符 */
+export function shortStamp(seconds) {
+  const t = Math.max(0, Number(seconds) || 0);
+  const m = Math.floor(t / 60);
+  const s = t - m * 60;
+  return `${m}:${s.toFixed(1).padStart(4, '0')}`;
+}
+
+/** 相邻两句之间出现这么长的静默，就认为格内存在一个"断点"，值得标出来 */
+export const CELL_BREAK_GAP = 1.0;
+
+/**
+ * 把台词贴到格子上。
+ *
+ * **不再是简单 join。** 一格常常跨两三句，而 `join(' ')` 抹掉了每句自己的起点 ——
+ * 模型只能拿 `cell.from` 当整段的锚点，结果整段被提前几十秒（实测被错位 30s）。
+ *
+ * 折中做法：只在**真有断点**的地方插内联时间戳（相邻句间隔 ≥ CELL_BREAK_GAP），
+ * 而不是每句都插 —— 每句都插会让 120 字的台词预算被 `[10:09.4]` 吃掉四分之一。
+ * 同时把 `lines`（每条带自己的 from/to）留给渲染层，将来要"一格多行"不必再改这里。
+ */
 export function alignCells(cells, segments) {
   return cells.map((cell) => {
     const hits = segments.filter((s) => s.to > cell.from && s.from < cell.to);
-    const text = hits.map((s) => s.text).join(' ').trim();
+    const parts = [];
+    for (let i = 0; i < hits.length; i++) {
+      if (i > 0 && hits[i].from - hits[i - 1].to >= CELL_BREAK_GAP) {
+        parts.push(`[${shortStamp(hits[i].from)}]`);
+      }
+      parts.push(hits[i].text);
+    }
+    const text = parts.join(' ').trim();
     const dur = Math.max(0.1, cell.to - cell.from);
     return {
       text,
       chars: text.length,
       charsPerSec: +(text.length / dur).toFixed(2),
       segments: hits.length,
+      // 每句自己的时间轴：信息本来就有，之前被 join 丢掉了
+      lines: hits.map((s) => ({
+        from: +Number(s.from).toFixed(2),
+        to: +Number(s.to).toFixed(2),
+        text: s.text,
+      })),
+      // 格内存在断点时为 true —— 渲染层可以据此提示"这一格跨了两件事"
+      broken: hits.length > 1 && hits.some((s, i) => i > 0 && s.from - hits[i - 1].to >= CELL_BREAK_GAP),
     };
   });
 }

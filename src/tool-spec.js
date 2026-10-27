@@ -38,7 +38,9 @@ export function storyboardToolSpec() {
       input: {
         type: 'string',
         required: true,
-        description: 'Absolute path to a video file readable by ffmpeg (mp4/mov/mkv/webm...).',
+        description: 'Local absolute path (mp4/mov/mkv/webm...), or an http(s) link such as a Bilibili ' +
+          'video URL. Links are downloaded once at low resolution for scanning; video_zoom re-reads ' +
+          'the original stream at high resolution.',
       },
       from: {
         type: 'number',
@@ -76,6 +78,29 @@ export function storyboardToolSpec() {
         type: 'string',
         enum: ['auto', 'off'],
         description: 'Default "auto": use the embedded subtitle track if present, otherwise ASR when configured. "off" skips speech entirely.',
+      },
+      transcriptFile: {
+        type: 'string',
+        description: 'Path to an existing transcript (SRT, or JSON with [{start,end,text}] / ' +
+          '[{from,to,text}] / Bilibili {body:[{from,to,content}]}). When given, the subtitle track ' +
+          'and ASR are both skipped — use this when the site already has captions.',
+      },
+      scanHeight: {
+        type: 'integer',
+        description: 'For http(s) links: which resolution to download for scanning (default 360). ' +
+          'Scanning only needs structure — it gets downscaled to 64x36 — so a low tier is both ' +
+          'faster and 15x smaller. Close-ups go through video_zoom instead.',
+      },
+      cookies: {
+        type: 'string',
+        description: 'Path to a Netscape cookies.txt for http(s) links. Falls back to DSH_VIDEO_COOKIES. ' +
+          'Required by default: without a signed-in session the available resolution is unpredictable ' +
+          'and a 1080p tier can simply be absent from the format list.',
+      },
+      allowAnonymous: {
+        type: 'boolean',
+        description: 'Anonymous fetching is always allowed. Set this to true to suppress the ' +
+          '"resolution not guaranteed" note when you already know this source is fine without cookies.',
       },
       detail: {
         type: 'string',
@@ -143,7 +168,13 @@ export function zoomToolSpec() {
       'Costs one image (~384 tokens), like any other tool result with one image.',
     ].join('\n'),
     parameters: {
-      input: { type: 'string', required: true, description: 'Absolute path to the video file.' },
+      input: {
+        type: 'string',
+        required: true,
+        description: 'Local absolute path, or the same http(s) link you passed to video_storyboard. ' +
+          'A link is re-read from the original stream at high resolution, so cells here can be ' +
+          'sharper than the storyboard even when the scan itself used a low tier.',
+      },
       from: { type: 'number', required: true, description: 'Window start in seconds.' },
       to: { type: 'number', required: true, description: 'Window end in seconds.' },
       cells: {
@@ -169,6 +200,19 @@ export function zoomToolSpec() {
         type: 'number',
         description: 'Minimum spacing between cells in seconds (default 1.2). Lower it to 0.3-0.5 ' +
           'when re-reading a fast-cut montage so short shots get their own cell instead of being merged.',
+      },
+      zoomHeight: {
+        type: 'integer',
+        description: 'For http(s) links: which resolution to read the original stream at (default 1080). ' +
+          'One frame only — cheaper than downloading. Never exceeds what the source itself offers.',
+      },
+      cookies: {
+        type: 'string',
+        description: 'Path to a Netscape cookies.txt. Falls back to DSH_VIDEO_COOKIES.',
+      },
+      allowAnonymous: {
+        type: 'boolean',
+        description: 'Anonymous reading is always allowed. Set this to true to suppress the warning note.',
       },
     },
     output: {
@@ -209,7 +253,20 @@ export function probeToolSpec() {
       'Then either video_storyboard (overview, or a window) or video_zoom (close-up).',
     ].join('\n'),
     parameters: {
-      input: { type: 'string', required: true, description: 'Absolute path to the video file.' },
+      input: {
+        type: 'string',
+        required: true,
+        description: 'Local absolute path, or an http(s) link. For a link this resolves metadata ' +
+          'only (no download): title, duration, and the resolutions the source actually offers.',
+      },
+      cookies: {
+        type: 'string',
+        description: 'Path to a Netscape cookies.txt. Falls back to DSH_VIDEO_COOKIES.',
+      },
+      allowAnonymous: {
+        type: 'boolean',
+        description: 'Anonymous probing is always allowed. Set this to true to suppress the warning note.',
+      },
     },
     output: {
       schema: {
@@ -262,6 +319,20 @@ export function validateToolArgs(args) {
   if (args.detail !== undefined && !['low', 'med', 'high'].includes(args.detail)) {
     problems.push("detail must be 'low', 'med' or 'high'");
   }
+  if (args.transcriptFile !== undefined
+    && (typeof args.transcriptFile !== 'string' || args.transcriptFile.trim() === '')) {
+    problems.push('transcriptFile must be a non-empty path');
+  }
+  if (args.scanHeight !== undefined
+    && (!Number.isInteger(args.scanHeight) || args.scanHeight < 120 || args.scanHeight > 2160)) {
+    problems.push('scanHeight must be an integer 120..2160');
+  }
+  if (args.cookies !== undefined && (typeof args.cookies !== 'string' || args.cookies.trim() === '')) {
+    problems.push('cookies must be a non-empty path');
+  }
+  if (args.allowAnonymous !== undefined && typeof args.allowAnonymous !== 'boolean') {
+    problems.push('allowAnonymous must be a boolean');
+  }
   return problems;
 }
 
@@ -278,5 +349,15 @@ export function validateZoomArgs(args) {
     problems.push('cells must be an integer 1..9');
   }
   if (args.minGap !== undefined && !(args.minGap >= 0)) problems.push('minGap must be >= 0');
+  if (args.zoomHeight !== undefined
+    && (!Number.isInteger(args.zoomHeight) || args.zoomHeight < 120 || args.zoomHeight > 2160)) {
+    problems.push('zoomHeight must be an integer 120..2160');
+  }
+  if (args.cookies !== undefined && (typeof args.cookies !== 'string' || args.cookies.trim() === '')) {
+    problems.push('cookies must be a non-empty path');
+  }
+  if (args.allowAnonymous !== undefined && typeof args.allowAnonymous !== 'boolean') {
+    problems.push('allowAnonymous must be a boolean');
+  }
   return problems;
 }

@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { chunkWindows, mergeSegments, transcribeLong } from '../src/asr.js';
+import {
+  alignCells, CELL_BREAK_GAP, chunkWindows, mergeSegments, shortStamp, transcribeLong,
+} from '../src/asr.js';
 
 /* ---------------------------------------------------------------- 空结果的诚实度 */
 
@@ -46,4 +48,62 @@ test('mergeSegments: 不同句子即使时间重叠也不合并', () => {
     { from: 4, to: 9, text: '乙' },
   ]);
   assert.equal(merged.length, 2);
+});
+
+/* ---------------------------------------------------------------- 台词贴格（时间戳不再被 join 丢掉） */
+
+const seg = (from, to, text) => ({ from, to, text });
+
+test('shortStamp: m:ss.s，分钟不进位到小时', () => {
+  assert.equal(shortStamp(0), '0:00.0');
+  assert.equal(shortStamp(9.4), '0:09.4');
+  assert.equal(shortStamp(609.42), '10:09.4');
+  assert.equal(shortStamp(3725.5), '62:05.5');
+});
+
+test('alignCells: 格内两句连续时保持一句流畅的话，不插时间戳', () => {
+  const [cell] = alignCells(
+    [{ from: 0, to: 10 }],
+    [seg(0, 3, '前半句'), seg(3.2, 6, '后半句')],
+  );
+  assert.equal(cell.text, '前半句 后半句');
+  assert.equal(cell.broken, false);
+  assert.equal(cell.segments, 2);
+});
+
+test('alignCells: 格内出现明显断点时插内联时间戳（这正是错位 30 秒的根源）', () => {
+  // 复刻实测场景：格 09:38.9–10:20.5 里，10:09.4 才是"第六，歌曲"的真正起点
+  const [cell] = alignCells(
+    [{ from: 578.9, to: 620.5 }],
+    [seg(578.9, 600.0, '…这类海洋巨怪视频。'), seg(609.4, 620.5, '第六，歌曲说爱请…')],
+  );
+  assert.equal(cell.broken, true);
+  assert.match(cell.text, /\[10:09\.4\] 第六，歌曲/);
+  // 第一句不加前缀（它是格的起点，前缀冗余）
+  assert.ok(!cell.text.startsWith('['), `首句不该带前缀: ${cell.text}`);
+});
+
+test('alignCells: 断点阈值边界——刚好低于阈值不插，达到才插', () => {
+  const tight = alignCells([{ from: 0, to: 10 }], [seg(0, 3, 'a'), seg(3 + CELL_BREAK_GAP - 0.01, 6, 'b')])[0];
+  assert.equal(tight.broken, false);
+  const loose = alignCells([{ from: 0, to: 10 }], [seg(0, 3, 'a'), seg(3 + CELL_BREAK_GAP, 6, 'b')])[0];
+  assert.equal(loose.broken, true);
+});
+
+test('alignCells: lines 保留每句自己的时间轴（信息本来就在 hits 上）', () => {
+  const [cell] = alignCells(
+    [{ from: 0, to: 10 }],
+    [seg(1, 2, 'a'), seg(5, 6, 'b')],
+  );
+  assert.deepEqual(cell.lines, [
+    { from: 1, to: 2, text: 'a' },
+    { from: 5, to: 6, text: 'b' },
+  ]);
+});
+
+test('alignCells: 没有台词命中时，text 为空且 broken 不为真', () => {
+  const [cell] = alignCells([{ from: 0, to: 10 }], []);
+  assert.equal(cell.text, '');
+  assert.equal(cell.broken, false);
+  assert.deepEqual(cell.lines, []);
 });

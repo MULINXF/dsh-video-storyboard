@@ -186,6 +186,32 @@ video_storyboard({ input, cells: 9, detail: 'low' })          // 总览，便宜
 video_storyboard({ input, cells: 9, textOnly: true, cellRange: [4, 6], detail: 'high' })
 ```
 
+### G. 贴一条 B 站链接
+
+```js
+// ① 先探长度和"能拿到多高"，不下载（约 2.4 s）
+video_probe({ input: "https://www.bilibili.com/video/BV1xx" })
+
+// ② 出总览；首次会下一份 360P（5 分钟约 7 MB），之后命中缓存
+video_storyboard({ input: "https://www.bilibili.com/video/BV1xx", cells: 9 })
+
+// ③ 某一段看不清 → 回到原始流取 1080P，不落盘
+video_zoom({ input: "https://www.bilibili.com/video/BV1xx", from: 42, to: 58 })
+```
+
+**如果站点本来就有字幕，别让它再跑一遍 ASR**：把字幕存成 SRT 或 JSON，用 `transcriptFile` 传进去。
+同一条 90 秒片子，带 ASR 16.9 秒、带字幕文件 **5.1 秒**。
+
+```js
+video_storyboard({ input: url, transcriptFile: "D:/subs/ep04.srt" })
+```
+
+支持三种格式：SRT、`[{start,end,text}]`、B 站字幕 JSON（`{body:[{from,to,content}]}`），自动识别。
+
+**取流失败时先看这三条**：`yt-dlp not found` → 设 `DSH_YTDLP_PATH`；`Failed to decrypt with DPAPI`
+→ 你用了 `--cookies-from-browser`（Chromium 127+ 的 v20 加密解不开），改成导出 cookies.txt；
+`Source limit ...` → 这条视频本身最高就到那个档，换账号也没用。
+
 ### F. 命令行批处理（整片）
 
 ```bash

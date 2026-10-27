@@ -326,7 +326,7 @@ export function sharpness(buf, width, height) {
 export async function extractSharpest(opts) {
   const {
     input, at, dur, cellW, cellH, ffmpegPath = DEFAULT_FFMPEG,
-    candidates = 3, margin = 0.25, timeoutMs,
+    candidates = 3, margin = 0.25, timeoutMs, http,
   } = opts;
   const safeDur = Math.max(0, dur || 0);
   const pad = Math.min(margin, safeDur / 3);
@@ -338,7 +338,7 @@ export async function extractSharpest(opts) {
     for (let i = 0; i < candidates; i++) times.push(at + pad + (span * i) / (candidates - 1));
   }
   const picked = await Promise.all(times.map((t) =>
-    extractFrameRaw({ input, at: t, cellW, cellH, ffmpegPath, timeoutMs })
+    extractFrameRaw({ input, at: t, cellW, cellH, ffmpegPath, timeoutMs, http })
       .then((f) => ({ ...f, sharp: sharpness(f.buffer, cellW, cellH) }))));
   return picked.reduce((best, cur) => (cur.sharp > best.sharp ? cur : best));
 }
@@ -370,27 +370,42 @@ export const coverFilter = (cellW, cellH) =>
 const PTS_RE = /pts_time:([0-9.]+)/g;
 
 /**
+ * 远程取帧时要带的 HTTP 头。
+ * B 站 CDN 对**空 UA 直接 403**（实测），Referer 也校验；两个都必须放在 `-i` 之前。
+ * 本地路径不产生任何额外参数 —— 不能给所有调用都塞 header，那会让 ffmpeg 报未知选项以外的问题。
+ */
+export function httpInputArgs(input, http) {
+  if (!http || !/^https?:\/\//i.test(String(input))) return [];
+  const args = [];
+  if (http.userAgent) args.push('-user_agent', http.userAgent);
+  if (http.referer) args.push('-referer', http.referer);
+  return args;
+}
+
+/**
  * 取一帧，返回 rawvideo rgb24（正好 cellW*cellH*3 字节）与真实时刻。
  * @param {{input:string, at:number, dur?:number, cellW:number, cellH:number,
- *          ffmpegPath?:string, mode?:'mid'|'thumb', timeoutMs?:number}} opts
+ *          ffmpegPath?:string, mode?:'mid'|'thumb', timeoutMs?:number,
+ *          http?:{userAgent?:string, referer?:string}}} opts
  */
 export async function extractFrameRaw(opts) {
   const {
-    input, at, dur, cellW, cellH, ffmpegPath = DEFAULT_FFMPEG, mode = 'mid', timeoutMs,
+    input, at, dur, cellW, cellH, ffmpegPath = DEFAULT_FFMPEG, mode = 'mid', timeoutMs, http,
   } = opts;
   const filter = coverFilter(cellW, cellH);
+  const netArgs = httpInputArgs(input, http);
   let args;
   let seek;
   if (mode === 'thumb' && dur > 0) {
     // 段内取"直方图最接近该段均值"的帧：对溶解/过曝/空镜比硬取中点稳
     seek = at;
     const n = Math.max(2, Math.min(300, Math.round(dur * 25)));
-    args = ['-hide_banner', '-v', 'info', '-nostdin', '-ss', String(at), '-t', String(dur), '-i', input,
+    args = ['-hide_banner', '-v', 'info', '-nostdin', '-ss', String(at), '-t', String(dur), ...netArgs, '-i', input,
       '-an', '-sn', '-vf', `thumbnail=n=${n},showinfo,${filter}`, '-frames:v', '1',
       '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'];
   } else {
     seek = dur > 0 ? at + dur / 2 : at;
-    args = ['-hide_banner', '-v', 'error', '-nostdin', '-ss', String(seek), '-i', input,
+    args = ['-hide_banner', '-v', 'error', '-nostdin', '-ss', String(seek), ...netArgs, '-i', input,
       '-an', '-sn', '-vf', filter, '-frames:v', '1',
       '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'];
   }

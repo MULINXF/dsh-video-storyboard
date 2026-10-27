@@ -12,8 +12,9 @@
  *  - saveImage 要的是**真正编码后的字节**（PNG/JPEG），不是裸 RGB —— 它会解码校验
  */
 
-import { DETAIL_CHARS, runStoryboard, formatManifest, formatProbe } from './pipeline.js';
+import { DETAIL_CHARS, runStoryboard, formatManifest, formatProbe, formatRemoteProbe } from './pipeline.js';
 import { probeVideo } from './probe.js';
+import { isHttpUrl, probeUrl, resolveDirectUrl, resolveInput } from './fetch.js';
 import {
   storyboardToolSpec, zoomToolSpec, probeToolSpec, validateToolArgs, validateZoomArgs,
 } from './tool-spec.js';
@@ -79,24 +80,64 @@ export async function apply(ctx) {
       burn: args.burn ?? 'index',
       minGap: args.minGap ?? 1.2,
       transcript: args.transcript ?? 'auto',
+      transcriptFile: args.transcriptFile,
       textOnly: args.textOnly === true,
       detail: args.detail ?? 'med',
+      fetchOptions: {
+        cookies: args.cookies,
+        allowAnonymous: args.allowAnonymous === true,
+        scanHeight: args.scanHeight ?? 360,
+      },
     }, validateToolArgs(args), args.cellRange ?? null),
   });
 
   const zoom = defineTool({
     ...zoomToolSpec(),
-    execute: (args) => runAndAttach(ctx, {
-      input: args.input,
-      from: args.from,
-      to: args.to,
-      cells: args.cells ?? 6,
-      sheets: 1,
-      pick: args.pick ?? 'sharp',
-      burn: args.burn ?? 'index',
-      // 近距离重看时不再按密度挪格：窗口本来就短，均分更好预测
-      adaptive: false,
-    }, validateZoomArgs(args)),
+    async execute(args) {
+      const problems = validateZoomArgs(args);
+      if (problems.length > 0) throw new Error(`invalid arguments: ${problems.join('; ')}`);
+      const fetchOptions = {
+        cookies: args.cookies,
+        allowAnonymous: args.allowAnonymous === true,
+        // zoom 需要本地那份低清做兜底，所以这里也要提供落盘清晰度
+        scanHeight: 360,
+        zoomHeight: args.zoomHeight ?? 1080,
+      };
+      // 链接模式下先设法拿到高清直链：stroryboard 那次 `-J` 通常已经记下了，
+      // 这里多半是内存命中；实在没有才真的再解析一次（2.4 s）。
+      let frameSource = null;
+      if (isHttpUrl(args.input)) {
+        try {
+          const resolved = await resolveInput(args.input, fetchOptions);
+          frameSource = resolved.frameSource
+            ?? await resolveDirectUrl(args.input, { ...fetchOptions, height: fetchOptions.zoomHeight });
+        } catch {
+          /* 直链拿不到就退回本地低清：糊一点，但整次调用不该失败 */
+        }
+      }
+      const result = await runStoryboard({
+        input: args.input,
+        from: args.from,
+        to: args.to,
+        cells: args.cells ?? 6,
+        sheets: 1,
+        pick: args.pick ?? 'sharp',
+        burn: args.burn ?? 'index',
+        // 近距离重看时不再按密度挪格：窗口本来就短，均分更好预测
+        adaptive: false,
+        frameSource,
+        fetchOptions,
+      });
+      const images = [];
+      for (const sheet of result.sheets) {
+        images.push(await ctx.attachments.saveImage({
+          data: sheet.png,
+          mediaType: 'image/png',
+          name: `storyboard-${sheet.sheet}.png`,
+        }));
+      }
+      return { images, text: formatManifest(result, { maxCellChars: DETAIL_CHARS.med }) };
+    },
   });
 
   // 只读容器头，不花图片 token —— 让模型在第一次出图前先知道"多长、按什么粒度读"
@@ -104,6 +145,12 @@ export async function apply(ctx) {
     ...probeToolSpec(),
     async execute(args) {
       if (!args?.input) throw new Error('input is required');
+      const fetchOptions = { cookies: args.cookies, allowAnonymous: args.allowAnonymous === true };
+      // 链接只解析、不下载：probe 的价值是"便宜"，下载 7 MB 就失去意义了
+      if (isHttpUrl(args.input)) {
+        const remote = await probeUrl(args.input, fetchOptions);
+        return { text: formatRemoteProbe(remote) };
+      }
       const info = { ...(await probeVideo(args.input)), path: args.input };
       return { text: await formatProbe(info) };
     },

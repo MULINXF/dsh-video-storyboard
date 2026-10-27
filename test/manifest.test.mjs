@@ -212,3 +212,34 @@ test('withSheetSuffix: 任何扩展名都不会互相覆盖', () => {
 test('withSheetSuffix: 没有扩展名时直接追加', () => {
   assert.equal(withSheetSuffix('out', 2), 'out-2');
 });
+
+/* ---------------------------------------------------------------- 抽帧时刻必须可见 */
+
+test('manifest: pick=sharp 时每格给出 frame@（它推不出来，且不等于格起点）', () => {
+  const r = makeResult({ cells: 4 });
+  const text = formatManifest(r);
+  // 第 1 格 t_start=0, t_frame=70 → frame@01:10.00
+  assert.match(text, /cell 1 .*frame@01:10\.00/);
+  assert.match(text, /frame@ = the exact moment the cell's picture was taken/);
+  assert.match(text, /which is NOT the cell start/);
+});
+
+test('manifest: pick=mid 时不写 frame@（中点可推导，写了只是占字符）', () => {
+  const r = makeResult({ cells: 4 });
+  r.plan.pick = 'mid';
+  const text = formatManifest(r);
+  assert.ok(!/frame@/.test(text), 'mid 模式不该出现 frame@');
+});
+
+test('manifest: 格内有台词断点时提示"不要把格起点当成新话题的起点"', () => {
+  const r = makeResult({ cells: 4 });
+  r.sheets[0].cells[0].broken = true;
+  const text = formatManifest(r);
+  assert.match(text, /a \[m:ss\.s\] marker inside a cell means the speech breaks there/);
+});
+
+test('manifest: 没有断点时不出那条提示（少一句废话）', () => {
+  const r = makeResult({ cells: 4 });
+  const text = formatManifest(r);
+  assert.ok(!/speech breaks there/.test(text));
+});
