@@ -130,6 +130,13 @@ test('ASR 客户端：没配 key 时直接返回 null，不发请求', async () 
   assert.equal(result, null);
 });
 
+test('ASR 客户端：多片窗口全部没配 key 时返回 null，不伪装成 0 段成功', async () => {
+  const result = await transcribeLong({
+    input: 'whatever.mp4', start: 0, end: 100, maxChunk: 45, apiKey: null,
+  });
+  assert.equal(result, null);
+});
+
 
 /* ---------------------------------------------------------------- 切片与漂移 */
 
@@ -236,6 +243,18 @@ test('resolveAsrConfig: 没有 env 时读 $DSH_HOME/asr.json', async () => {
     assert.equal(cfg.fileKey, 'local-key');
     assert.equal(cfg.source, 'file');
     assert.ok(cfg.configPath.endsWith('asr.json'));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('resolveAsrConfig: Windows BOM 的 asr.json 仍能读取', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-cfg-'));
+  await writeFile(join(dir, 'asr.json'), '\uFEFF' + JSON.stringify({ baseUrl: 'http://bom/v1', key: 'bom-key' }));
+  try {
+    const cfg = resolveAsrConfig({ DSH_HOME: dir });
+    assert.equal(cfg.baseUrl, 'http://bom/v1');
+    assert.equal(cfg.fileKey, 'bom-key');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * install-dev — 把本包同步进 DSH 的 desktop profile（开发用），并注册为 bundle。
+ * install-dev — 把本包同步进 DSH 的 desktop/web profile（开发用），并注册为 bundle。
  *
  *   node scripts/install-dev.mjs            # 安装 / 同步
  *   node scripts/install-dev.mjs --remove   # 卸载（还原 package.json）
@@ -11,22 +11,40 @@
  *
  * 为什么是复制而不是软链：Node 解析裸包名（`@deepseek-ai/dsh-tools`）时用的是真实路径，
  * 软链会让它从源码目录向上找、找不到宿主的包。复制到 profile 的 node_modules 里，
- * 解析链才是 profiles/desktop/node_modules → profiles/node_modules。
+ * 解析链才是 profiles/<profile>/node_modules → profiles/node_modules。
  */
 
-import { cp, readFile, writeFile, rm, readdir, stat } from 'node:fs/promises';
+import { cp, readFile, writeFile, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 
 const HERE = dirname(dirname(fileURLToPath(import.meta.url)));
 const DSH_HOME = process.env.DSH_HOME || join(homedir(), '.dsh');
-const PROFILE = process.env.DSH_PROFILE || 'desktop';
+const hasProfile = (name) => existsSync(join(DSH_HOME, 'profiles', name));
+const PROFILE = process.env.DSH_PROFILE
+  || (hasProfile('desktop') ? 'desktop' : hasProfile('web') ? 'web' : 'desktop');
 const PROFILE_DIR = join(DSH_HOME, 'profiles', PROFILE);
 const TARGET = join(PROFILE_DIR, 'node_modules', 'dsh-video-storyboard');
 const PKG_NAME = 'dsh-video-storyboard';
 const SKIP = new Set(['node_modules', '.git', 'test']);
+
+/** 插件运行时用裸包名 import('@deepseek-ai/dsh-tools')，安装前必须能解析。 */
+function findHostTools() {
+  const candidates = [
+    process.env.DSH_TOOLS_PATH,
+    join(PROFILE_DIR, 'node_modules', '@deepseek-ai', 'dsh-tools', 'lib', 'index.js'),
+    join(DSH_HOME, 'profiles', 'node_modules', '@deepseek-ai', 'dsh-tools', 'lib', 'index.js'),
+  ].filter(Boolean);
+  for (const path of candidates) if (existsSync(path)) return path;
+  try {
+    return createRequire(join(PROFILE_DIR, 'package.json')).resolve('@deepseek-ai/dsh-tools');
+  } catch {
+    return null;
+  }
+}
 
 const mode = process.argv.includes('--remove') ? 'remove'
   : process.argv.includes('--check') ? 'check' : 'install';
@@ -39,12 +57,16 @@ const pkgPath = join(PROFILE_DIR, 'package.json');
 const backupGlob = `package.json.bak-`;   // 首次安装会留一份
 
 async function readJson(path) {
-  return JSON.parse(await readFile(path, 'utf8'));
+  const text = await readFile(path, 'utf8');
+  return JSON.parse(text.replace(/^\uFEFF/, ''));
 }
 
 async function patchProfile({ add }) {
   const pkg = await readJson(pkgPath);
-  const bundles = pkg.dsh?.profile?.bundles ?? [];
+  pkg.dsh ??= {};
+  pkg.dsh.profile ??= {};
+  pkg.dsh.profile.bundles ??= [];
+  const bundles = pkg.dsh.profile.bundles;
   const hasDep = Object.hasOwn(pkg.dependencies ?? {}, PKG_NAME);
 
   if (add) {
@@ -77,16 +99,26 @@ async function report() {
   const pkg = await readJson(pkgPath);
   const registered = (pkg.dsh?.profile?.bundles ?? []).includes(PKG_NAME);
   const dep = pkg.dependencies?.[PKG_NAME] ?? null;
+  const hostTools = findHostTools();
   console.log(`profile      : ${PROFILE_DIR}`);
   console.log(`node_modules : ${installed ? '已安装' : '未安装'}  ${TARGET}`);
   console.log(`bundles 注册 : ${registered ? '是' : '否'}`);
   console.log(`dependencies : ${dep ?? '无'}`);
-  return { installed, registered, dep };
+  console.log(`dsh-tools    : ${hostTools ?? '未找到（插件 apply() 会失败）'}`);
+  return { installed, registered, dep, hostTools };
+}
+
+function printHostToolsHint() {
+  console.error('\n找不到 @deepseek-ai/dsh-tools。插件运行时执行 import(\'@deepseek-ai/dsh-tools\')，');
+  console.error('因此必须先让它在 profile 下可解析，或设置 DSH_TOOLS_PATH：');
+  console.error(`  $env:DSH_TOOLS_PATH='<DSH>\\node_modules\\@deepseek-ai\\dsh-tools\\lib\\index.js'`);
+  console.error('然后重启 DSH。');
 }
 
 if (mode === 'check') {
-  await report();
-  process.exit(0);
+  const state = await report();
+  if (!state.hostTools) printHostToolsHint();
+  process.exit(state.hostTools ? 0 : 3);
 }
 
 if (mode === 'remove') {
@@ -99,5 +131,7 @@ if (mode === 'remove') {
 
 await syncFiles();
 await patchProfile({ add: true });
-await report();
-console.log('\n完成。重启 DSH Desktop 后生效（插件树在进程启动时组合）。');
+const state = await report();
+if (!state.hostTools) printHostToolsHint();
+console.log('\n完成。重启 DSH 后生效（插件树在进程启动时组合）。');
+if (!state.hostTools) process.exit(3);

@@ -37,7 +37,7 @@ function readConfigFile(env) {
     // 文件存在但坏了：直接当成"没有配置"，不要再穿透到下一个候选，
     // 否则 $DSH_HOME 里的坏配置会被 ~/.dsh 的那份悄悄顶替掉，排查时看不出问题。
     try {
-      const parsed = JSON.parse(readFileSync(path, 'utf8'));
+      const parsed = JSON.parse(readFileSync(path, 'utf8').replace(/^\uFEFF/, ''));
       if (parsed && typeof parsed === 'object') return { ...parsed, path };
     } catch {
       return {};
@@ -76,7 +76,7 @@ export function resolveAsrConfig(env = process.env) {
   const envModel = cleanEnvValue(env.DSH_ASR_MODEL);
   const envLanguage = cleanEnvValue(env.DSH_ASR_LANG);
   const keyEnv = cleanEnvValue(env.DSH_ASR_KEY_ENV) || 'DSH_ASR_KEY';
-  const fromEnv = Boolean(envBaseUrl || env[keyEnv]);
+  const fromEnv = Boolean(envBaseUrl || envModel || envLanguage || env[keyEnv]);
   return {
     baseUrl: envBaseUrl || file.baseUrl || 'https://api.siliconflow.cn/v1',
     model: envModel || file.model || 'FunAudioLLM/SenseVoiceSmall',
@@ -188,7 +188,7 @@ export async function transcribe({
     from: +(Number(s.start) + start).toFixed(3),
     to: +(Number(s.end) + start).toFixed(3),
     text: String(s.text ?? '').trim(),
-  })).filter((s) => s.text);
+  })).filter((s) => s.text && Number.isFinite(s.from) && Number.isFinite(s.to) && s.to > s.from);
 
   if (segments.length === 0 && json.text) {
     // 没有分段信息：退化成"整段一句"，至少能放在对应的格子里
@@ -293,6 +293,8 @@ export async function transcribeLong(options = {}) {
     language = part.language ?? language;
     all.push(...part.segments);
   }
+  // 每一片都因为"没配置 key"返回 null 时，不要伪装成成功但 0 段的 ASR 结果。
+  if (all.length === 0 && !model) return null;
   return { segments: mergeSegments(all), model, language, chunks: windows.length };
 }
 

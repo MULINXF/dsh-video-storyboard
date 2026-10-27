@@ -35,6 +35,20 @@ async function makeColorFixture(dir, colors = COLORS, dur = 1) {
   return out;
 }
 
+/** 10fps + 30fps 拼接的 VFR 素材；扫描必须按时间轴归一，而不是按原始帧号猜时间。 */
+async function makeVfrFixture(dir) {
+  const out = join(dir, 'vfr.mkv');
+  await run(DEFAULT_FFMPEG, [
+    '-hide_banner', '-v', 'error', '-y',
+    '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=10:duration=1',
+    '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30:duration=1',
+    '-filter_complex', '[0:v][1:v]concat=n=2:v=1:a=0[v]',
+    '-map', '[v]', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+    '-vsync', 'vfr', out,
+  ]);
+  return out;
+}
+
 async function withFixture(t, fn, opts) {
   if (!hasFfmpeg) {
     t.skip('ffmpeg not on PATH');
@@ -72,6 +86,20 @@ test('e2e: 5 个纯色镜头 → 4 个切点，零误检，分离度足够', asy
     const cutMin = Math.min(...cuts.map((c) => c.score));
     assert.ok(cutMin > bgMax * 2, `分离度不足：cutMin=${cutMin.toFixed(1)} bgMax=${bgMax.toFixed(1)}`);
   });
+});
+
+test('e2e: VFR 素材归一成 CFR，帧数覆盖完整时长', async (t) => {
+  if (!hasFfmpeg) return t.skip('ffmpeg not on PATH');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-vfr-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const file = await makeVfrFixture(dir);
+  const info = await probeVideo(file);
+  const { frames, stats } = await scanShots({
+    input: file, fps: info.fps, start: 0, end: info.duration,
+  });
+  const expected = info.duration * info.fps;
+  assert.ok(Math.abs(frames - expected) <= 2, `CFR 帧数应为 ≈${expected}，实得 ${frames}`);
+  assert.ok(stats.at(-1).t > info.duration - 1, `最后时间码 ${stats.at(-1).t} 应接近结尾 ${info.duration}`);
 });
 
 test('e2e: 单色视频零切点（不误检）', async (t) => {

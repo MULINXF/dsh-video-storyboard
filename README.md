@@ -14,9 +14,9 @@
 
 ```bash
 git clone <this repo> && cd dsh-video-storyboard
-node --test                      # 154 tests, needs ffmpeg
+node --test                      # unit + ffmpeg e2e tests
 node bin/storyboard.mjs video.mp4 --cells 9 --text   # see what the model would get
-node scripts/install-dev.mjs     # mount into the DSH desktop profile, then restart DSH
+node scripts/install-dev.mjs     # mount into the detected DSH profile, then restart DSH
 ```
 
 ## Status (v0.1)
@@ -36,7 +36,7 @@ node scripts/install-dev.mjs     # mount into the DSH desktop profile, then rest
 | `src/cache.js` — scan-result cache keyed by file+window+threshold | ✅ implemented (2nd call on a 5-min clip: 13.4 s → 3.6 s) |
 
 ```bash
-npm test                                                  # 154 passing (unit + ffmpeg e2e + host contract)
+npm test                                                  # unit + ffmpeg e2e + host contract (when DSH is present)
 node bin/scan-video.mjs video.mp4 9                       # 调阈值：切点 / 分数 / 段长 / top peaks
 node bin/storyboard.mjs video.mp4 --cells 9               # 端到端出一张图 + manifest
 node bin/storyboard.mjs film.mp4 --from 600 --to 780      # 只看某一段（不扫全片）
@@ -169,20 +169,25 @@ Frames are decoded straight to `rgb24` at cell resolution, the grid is assembled
 
 ## Install (dev)
 
-Not on npm yet. The **desktop** profile is managed exclusively by the Electron app, so
-`dsh plugin --profile desktop ...` is refused — use the bundled script instead:
+Not on npm yet. Desktop profiles are managed by the Electron app, so use the bundled script rather
+than `dsh plugin`. It auto-detects `desktop` when present, otherwise `web`; override with
+`DSH_PROFILE` and point `DSH_HOME` at non-default harness homes:
 
-```bash
-node scripts/install-dev.mjs           # 同步 + 注册为 bundle（会备份 package.json）
-node scripts/install-dev.mjs --check   # 只看状态
-node scripts/install-dev.mjs --remove  # 卸载
+```powershell
+# Windows / this repo's primary target
+$env:DSH_HOME = "$env:USERPROFILE\.dsh"   # or your .dsh-home path
+node scripts/install-dev.mjs               # sync + register bundle (backs up package.json)
+node scripts/install-dev.mjs --check       # status + host-resolution check
+node scripts/install-dev.mjs --remove      # uninstall
 ```
 
-Then **restart DSH Desktop** (the plugin tree is composed at process start).
+Then **restart DSH** (the plugin tree is composed at process start).
 
 It copies the package into `<dsh-home>/profiles/<profile>/node_modules/` rather than symlinking,
-because Node resolves bare specifiers (`@deepseek-ai/dsh-tools`) through the *real* path — a symlink
-would walk up from this repo and never find the host package.
+because Node resolves bare specifiers through the *real* path. The plugin imports
+`@deepseek-ai/dsh-tools` at runtime, so that package must be resolvable from the profile. If your
+deployment keeps it only inside a pnpm store, set `DSH_TOOLS_PATH` to its `lib/index.js` before
+starting DSH; `--check` reports whether resolution will work.
 
 After changing this package, re-run the script and restart again (the copy is a snapshot).
 
@@ -202,14 +207,15 @@ with it. The supported subset is string/number/integer/boolean/null/array/object
 Two things the existing ones don't do:
 
 1. **Addressable cells.** A big, high-contrast index is burned into each cell's corner, so a small vision model *reads* the number instead of *counting* cells (counting is a known weak spot). The text manifest carries `cell k (r2c3) = 00:12.76–00:31.40` on top of that — belt and braces.
-2. **Transcript aligned to cells.** ASR runs *first*; its sentence boundaries are one of three signals used to cut segments (visual cut / silence > 0.6 s / sentence end). A 10-minute talking-head does not degrade into nine identical faces.
+2. **Transcript aligned to cells.** The visual scan runs first; when a transcript is available, its speech density is a third signal for cell placement (alongside visual cut rate and the base density curve). Sentence boundaries are not used to force shot cuts. A 10-minute talking-head still gets transcript text attached to each overlapping cell.
 
 ## Decisions worth knowing
 
 - **The pixel budget is fixed** (~640k per image, ~384 tokens per image), so `m×n` only decides *how many frames share one image*. More detail is bought by **sending another image**, never by cutting cells smaller.
 - **Square grids keep the source aspect** (`canvas = (m/n) × source`). For a 16:9 video use `2×2` / `3×3` / `3×4` — *not* `4×3`, whose canvas is 2.37:1 and gets cropped by square-ish encoders.
-- **Coarse first, then zoom.** Default plan is always `balanced` (3×3, one image). The model then asks for a close-up of the cells it cares about.
-- **Only the index is burned in.** Timestamps are 8 characters at 7.5% cell height — they die first under compression, and the text manifest already carries them exactly.
+- **VFR and anamorphic sources are normalized.** The scanner converts to CFR before deriving cut timestamps, and SAR is folded into the display aspect before layout; a 720×480 4:3-SAR clip is treated as 16:9, not stretched.
+- **Coarse first, then zoom.** Cell count is auto-selected from duration and visual density (4–16 cells, 1–4 images); pass `cells: 9` for a 3×3 balanced grid. The model then asks for a close-up of the cells it cares about.
+- **Index is burned by default; timestamps are optional.** `burn: "index+time"` adds a compact `MM:SS` (or `H:MM:SS`) line below the index. Exact frame times remain in the text manifest; `--badge 0` disables burning entirely.
 - **Empty cells are neutral grey with a dash and no number**, so padding is never mistaken for content.
 
 ## Troubleshooting

@@ -11,7 +11,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, readdir, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, stat, unlink, utimes, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -46,9 +46,14 @@ export async function cacheKey({ input, start, end, threshold }) {
 
 export async function readCache(key, { dir = cacheDir() } = {}) {
   if (!key) return null;
+  const path = join(dir, `${key}.json`);
   try {
-    const payload = JSON.parse(await readFile(join(dir, `${key}.json`), 'utf8'));
-    return payload?.v === CACHE_VERSION ? payload : null;
+    const payload = JSON.parse(await readFile(path, 'utf8'));
+    if (payload?.v !== CACHE_VERSION) return null;
+    // pruneCache 按 mtime 淘汰；命中时 touch，才是真的 LRU 而不是"最旧写入"。
+    const now = new Date();
+    await utimes(path, now, now).catch(() => {});
+    return payload;
   } catch {
     return null;
   }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile, readdir } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, readdir, stat, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -38,6 +38,19 @@ test('读写往返', async () => {
     const hit = await readCache('abc', { dir });
     assert.deepEqual(hit.value, { cuts: 3 });
     assert.equal(hit.v, 1);
+  });
+});
+
+test('命中缓存会 touch mtime，prune 才是真正 LRU', async () => {
+  await withTemp(async (dir) => {
+    await writeCache('touchme', { value: { ok: true } }, { dir });
+    const path = join(dir, 'touchme.json');
+    const old = new Date(Date.now() - 3600_000);
+    await utimes(path, old, old);
+    const before = (await stat(path)).mtimeMs;
+    await readCache('touchme', { dir });
+    const after = (await stat(path)).mtimeMs;
+    assert.ok(after > before + 1000, `命中后 mtime 应更新：${before} -> ${after}`);
   });
 });
 

@@ -66,12 +66,21 @@ export function frameToHsv(rgb, out = new Float32Array((rgb.length / 3) * 3)) {
   return out;
 }
 
-/** 两帧 HSV 的加权绝对差均值，0–255。全权重大于 1 时按权重和归一。 */
+/**
+ * 两帧 HSV 的加权绝对差均值，0–255。全权重大于 1 时按权重和归一。
+ *
+ * 色相是环形量：0 和 255 只差 1，而不是 255。这里用圆环最短距离，并按两帧
+ * 中较低的饱和度给色相降权。否则接近灰色的像素会因为压缩噪声随机落到色环
+ * 另一端，制造出肉眼看不见的"切点"。
+ */
 export function scorePair(prev, cur) {
   if (prev.length !== cur.length) throw new RangeError('frames must have the same length');
   let sum = 0;
   for (let i = 0; i < cur.length; i += 3) {
-    sum += Math.abs(cur[i] - prev[i]) * HUE_WEIGHT
+    const rawHueDelta = Math.abs(cur[i] - prev[i]);
+    const hueDelta = Math.min(rawHueDelta, 255 - rawHueDelta);
+    const saturationWeight = Math.min(prev[i + 1], cur[i + 1]) / 255;
+    sum += hueDelta * HUE_WEIGHT * saturationWeight
       + Math.abs(cur[i + 1] - prev[i + 1]) * SAT_WEIGHT
       + Math.abs(cur[i + 2] - prev[i + 2]) * VAL_WEIGHT;
   }
@@ -140,7 +149,7 @@ export function scanSummary(scores) {
  * 扫描整条视频，返回切点与逐帧分数。
  * @param {{input:string, fps:number, ffmpegPath?:string, width?:number, height?:number,
  *          threshold?:number|'auto', minGap?:number, signal?:AbortSignal, onProgress?:Function}} opts
- *   threshold='auto' 时按 p95×3 自适应（推荐，真实素材与合成素材都能用）
+ *   threshold='auto' 时按目标切点速率自适应（推荐，真实素材与合成素材都能用）
  * @returns {Promise<{cuts:Array<{t:number,score:number}>, stats:Array<{t:number,score:number}>,
  *                    frames:number, threshold:number}>}
  */
@@ -168,9 +177,10 @@ export function scanShots(opts) {
       ffmpegPath,
       ['-hide_banner', '-v', 'error', '-nostdin',
         ...(start > 0 ? ['-ss', String(start)] : []),
-        ...(end !== undefined ? ['-t', String(Math.max(0.1, end - start))] : []),
+        ...(end !== undefined ? ['-t', String(Math.max(0.001, end - start))] : []),
         '-i', input, '-an', '-sn',
-        '-vf', `scale=${width}:${height},format=rgb24`, '-f', 'rawvideo', '-'],
+        // fps 滤镜把 VFR 归一成 CFR；否则用 frame / fps 推时间码会累积漂移。
+        '-vf', `scale=${width}:${height},fps=${fps},format=rgb24`, '-f', 'rawvideo', '-'],
       { stdio: ['ignore', 'pipe', 'pipe'], signal },
     );
 

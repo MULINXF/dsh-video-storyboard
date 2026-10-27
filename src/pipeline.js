@@ -5,6 +5,8 @@
  * 本模块只返回内存里的 PNG buffer 与结构化清单，落盘由调用方决定。
  */
 
+import { extname } from 'node:path';
+
 import { probeVideo, DEFAULT_FFMPEG, DEFAULT_FFPROBE } from './probe.js';
 import { scanShots } from './scan.js';
 import { fitSegments, segmentsFromCuts, totalDur } from './segments.js';
@@ -64,11 +66,26 @@ export async function runStoryboard(opts) {
   if (!input) throw new Error('input is required');
   if (!PICK_MODES.includes(pick)) throw new RangeError(`pick must be one of ${PICK_MODES.join('/')}`);
   if (!BURN_MODES.includes(burn)) throw new RangeError(`burn must be one of ${BURN_MODES.join('/')}`);
+  const badgeValue = badgeRatio === undefined || badgeRatio === null ? 0.15 : Number(badgeRatio);
+  const effectiveBadgeRatio = Number.isFinite(badgeValue)
+    ? Math.max(0, Math.min(1, badgeValue))
+    : 0.15;
+  const effectiveBurn = effectiveBadgeRatio === 0 ? 'none' : burn;
 
   const info = { ...(await probeVideo(input, { ffprobePath })), path: input };
-  const winStart = Math.max(0, Math.min(Number(from) || 0, Math.max(0, info.duration - 0.2)));
-  const winEnd = Math.min(info.duration, Number(to) > 0 ? Number(to) : info.duration);
-  const winDur = Math.max(0.2, winEnd - winStart);
+  if (!(info.duration > 0)) throw new Error(`"${input}" has no usable duration`);
+  const requestedFrom = Number(from);
+  const requestedTo = Number(to);
+  if (Number.isFinite(requestedTo) && requestedTo < 0) {
+    throw new RangeError('to must be >= 0');
+  }
+  const winStart = Math.max(0, Number.isFinite(requestedFrom) ? requestedFrom : 0);
+  const winEnd = Math.min(info.duration, requestedTo > 0 ? requestedTo : info.duration);
+  if (winStart >= info.duration) {
+    throw new RangeError(`from must be less than video duration (${info.duration.toFixed(2)}s)`);
+  }
+  if (!(winEnd > winStart)) throw new RangeError('to must be greater than from');
+  const winDur = winEnd - winStart;
 
   // 扫描结果按 (文件, 窗口, 阈值策略) 缓存：storyboard 之后的 zoom 能直接复用
   const key = cache ? await cacheKey({ input, start: winStart, end: winStart + winDur, threshold }) : null;
@@ -175,12 +192,16 @@ export async function runStoryboard(opts) {
     for (const [gi, { from: a, to: b }] of group.entries()) {
       index += 1;
       const frame = pick === 'sharp'
-        ? await extractSharpest({ input, at: a, dur: b - a, cellW, cellH, ffmpegPath })
+        ? await extractSharpest({
+          input, at: a, dur: b - a, cellW, cellH, ffmpegPath,
+          sourceEnd: info.duration, fps: info.fps,
+        })
         : await extractFrameRaw({
           input, at: a, dur: b - a, cellW, cellH, ffmpegPath,
           mode: pick === 'thumb' ? 'thumb' : 'mid',
+          sourceEnd: info.duration, fps: info.fps,
         });
-      frames.push({ buffer: frame.buffer, index });
+      frames.push({ buffer: frame.buffer, index, time: frame.t });
       const text = aligned[gi] ?? null;
       cellMeta.push({
         i: index,
@@ -193,7 +214,8 @@ export async function runStoryboard(opts) {
       });
     }
     let sheet = composeSheet({
-      frames, cols, rows, cellAspect: info.aspect, budget: cellBudget, burn, badgeRatio,
+      frames, cols, rows, cellAspect: info.aspect, budget: cellBudget,
+      burn: effectiveBurn, badgeRatio: effectiveBadgeRatio,
     });
     if (stripAudio) {
       sheet = addAudioStrip(sheet, {
@@ -228,7 +250,7 @@ export async function runStoryboard(opts) {
         ...(transcriptInfo.error ? { error: transcriptInfo.error } : {}) }
       : null,
     plan: {
-      cells, sheets, adaptive, pick, burn, minGap,
+      cells, sheets, adaptive, pick, burn: effectiveBurn, badgeRatio: effectiveBadgeRatio, minGap,
       reason: suggestion?.reason ?? 'explicit',
       bursts: findBursts(relCuts, winDur).map((b) => ({
         from: +(b.from + winStart).toFixed(2), to: +(b.to + winStart).toFixed(2), shots: b.shots,
@@ -239,13 +261,20 @@ export async function runStoryboard(opts) {
   };
 }
 
-/** 把结果编码成 PNG 落盘（CLI 用；插件走附件服务，不落盘） */
+/** 为多图输出生成不会互相覆盖的路径；第一张沿用原路径，后续加 -N 后缀。 */
+export function numberedSheetPath(outPath, sheet, total) {
+  const originalExt = extname(outPath);
+  const ext = originalExt || '.png';
+  const base = originalExt ? outPath.slice(0, -originalExt.length) : outPath;
+  if (total <= 1 || sheet === 1) return originalExt ? outPath : `${outPath}.png`;
+  return `${base}-${sheet}${ext}`;
+}
+
+/** 把结果编码成图片落盘（CLI 用；插件走附件服务，不落盘） */
 export async function saveStoryboards(result, outPath, { ffmpegPath = DEFAULT_FFMPEG, quality } = {}) {
   const paths = [];
   for (const s of result.sheets) {
-    const path = result.sheets.length === 1
-      ? outPath
-      : outPath.replace(/\.png$/i, `-${s.sheet}.png`);
+    const path = numberedSheetPath(outPath, s.sheet, result.sheets.length);
     await encodeRaw(s.buffer, s.width, s.height, path, { ffmpegPath, quality });
     paths.push(path);
   }

@@ -63,7 +63,7 @@ export function storyboardToolSpec() {
       burn: {
         type: 'string',
         enum: ['index', 'index+time', 'none'],
-        description: 'What to burn into each cell. Default "index". "index+time" adds a timestamp but is hard to read at small cell sizes.',
+        description: 'What to burn into each cell. Default "index". "index+time" adds a compact MM:SS (or H:MM:SS) line below the index.',
       },
       minGap: {
         type: 'number',
@@ -136,7 +136,7 @@ export function zoomToolSpec() {
       burn: {
         type: 'string',
         enum: ['index', 'index+time', 'none'],
-        description: 'What to burn into each cell. Default "index".',
+        description: 'What to burn into each cell. Default "index". "index+time" adds a compact MM:SS line below the index.',
       },
       transcript: {
         type: 'string',

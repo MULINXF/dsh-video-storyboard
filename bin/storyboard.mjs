@@ -46,6 +46,7 @@ if (Number(opt.plan) > 0) {
 }
 
 const adaptive = !process.argv.includes('--no-adaptive');
+const badgeArg = Number(opt.badge);
 const t0 = Date.now();
 const r = await runStoryboard({
   input,
@@ -57,7 +58,7 @@ const r = await runStoryboard({
   minGap: Number(opt['min-gap']) || 0,
   pick: String(opt.pick),
   burn: String(opt.burn),
-  badgeRatio: Number(opt.badge) || 0.15,
+  badgeRatio: Number.isFinite(badgeArg) ? badgeArg : 0.15,
   transcript: String(opt.transcript),
   adaptive,
 });

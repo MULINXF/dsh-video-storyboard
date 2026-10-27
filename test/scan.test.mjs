@@ -53,6 +53,20 @@ test('scorePair: 红→绿只差色相 85 → 85/3', () => {
   assert.ok(near(scorePair(frameToHsv(px(255, 0, 0)), frameToHsv(px(0, 255, 0))), 85 / 3, 1e-4));
 });
 
+test('scorePair: 色相跨 0/255 按环形最短距离，不误报', () => {
+  const px = (r, g, b) => new Uint8Array([r, g, b, r, g, b]);
+  const a = frameToHsv(px(255, 0, 1));   // hue≈254.8
+  const b = frameToHsv(px(255, 1, 0));   // hue≈0.2，视觉几乎同色
+  assert.ok(scorePair(a, b) < 1, `跨色环边界不应被当成 255 的差：${scorePair(a, b)}`);
+});
+
+test('scorePair: 近灰像素的低饱和色相噪声被压低', () => {
+  const px = (r, g, b) => new Uint8Array([r, g, b, r, g, b]);
+  const a = frameToHsv(px(128, 128, 127));
+  const b = frameToHsv(px(128, 127, 128));
+  assert.ok(scorePair(a, b) < 1, `近灰差不应制造切点：${scorePair(a, b)}`);
+});
+
 test('scorePair: 同亮度换色是 ffmpeg 的死角，本实现能抓住', () => {
   // teal(15,118,110) → green(21,128,61)：实测亮度差 0.8%，色相差 24/255
   const a = frameToHsv(new Uint8Array([15, 118, 110]));

@@ -7,9 +7,9 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import {
-  BACKGROUND, BADGE_FG, DIGITS, DIGIT_H, DIGIT_W, PAD_FILL,
+  BACKGROUND, BADGE_FG, DIGITS, DIGIT_H, DIGIT_W, EXTRA_GLYPHS, PAD_FILL,
   badgeScale, composeSheet, drawBadge, drawGlyphs, encodeRaw, extractFrameRaw,
-  extractSharpest, fillRect, layoutCanvas, sharpness,
+  extractSharpest, fillRect, formatBadgeTime, layoutCanvas, sharpness,
 } from '../src/sheet.js';
 import { DEFAULT_FFMPEG, probeVideo } from '../src/probe.js';
 
@@ -50,6 +50,19 @@ test('badgeScale: 两位编号会被格宽限制，避免吃掉 1/3 画面', () 
   assert.equal(badgeScale(20, 40, 1, 0.05), 2);
 });
 
+test('时间码字形与格式化：MM:SS / H:MM:SS', () => {
+  for (const [ch, rows] of Object.entries(EXTRA_GLYPHS)) {
+    assert.equal(rows.length, DIGIT_H, `${ch} 行数`);
+    for (const row of rows) assert.equal(row.length, DIGIT_W, `${ch} 列数`);
+    assert.ok(rows.join('').includes('1'), `${ch} 是空字形`);
+  }
+  assert.equal(formatBadgeTime(0), '00:00');
+  assert.equal(formatBadgeTime(65.4), '01:05');
+  assert.equal(formatBadgeTime(3661), '1:01:01');
+  assert.equal(formatBadgeTime(-1), '');
+  assert.equal(formatBadgeTime('nope'), '');
+});
+
 test('drawGlyphs: 画出非零像素，且 "-" 是横条', () => {
   const w = 60;
   const h = 30;
@@ -88,6 +101,17 @@ test('fillRect: 不透明直接覆盖，半透明按 alpha 混合，越界自动
   fillRect(buf, w, h, 2, 0, 10, 1, [0, 0, 0], 0.5);
   assert.ok(Math.abs(px(buf, w, 2, 0)[0] - 50) <= 1);
   assert.doesNotThrow(() => fillRect(buf, w, h, -5, -5, 3, 3, [1, 2, 3]));
+});
+
+test('drawBadge: index+time 在编号下方追加时间码', () => {
+  const w = 140;
+  const h = 100;
+  const a = Buffer.alloc(w * h * 3, 200);
+  const b = Buffer.alloc(w * h * 3, 200);
+  const plain = drawBadge(a, w, h, 2, 2, w, h, 3);
+  const timed = drawBadge(b, w, h, 2, 2, w, h, 3, 0.2, '01:05');
+  assert.ok(timed.h > plain.h, `带时间码的徽标应更高：${timed.h} vs ${plain.h}`);
+  assert.ok(!a.equals(b), '时间码必须真的画进像素');
 });
 
 test('drawBadge: 左上角出现深色底 + 黄色字形', () => {
@@ -206,6 +230,14 @@ test('composeSheet: burn="none" 时不画编号', () => {
   const p = [8, 8];
   assert.ok(!near(px(burned.buffer, burned.width, ...p), [200, 40, 40]), '开编号时左上角被覆盖');
   assert.ok(near(px(plain.buffer, plain.width, ...p), [200, 40, 40]), '关编号时应保持原样');
+});
+
+test('composeSheet: burn="index+time" 与 burn="index" 像素不同', () => {
+  const { cellW, cellH } = layoutCanvas(1, 1, 16 / 9);
+  const frame = { buffer: solid(cellW, cellH, [200, 40, 40]), index: 1, time: 65.4 };
+  const indexOnly = composeSheet({ frames: [frame], cols: 1, rows: 1, cellAspect: 16 / 9, burn: 'index' });
+  const timed = composeSheet({ frames: [frame], cols: 1, rows: 1, cellAspect: 16 / 9, burn: 'index+time' });
+  assert.ok(!indexOnly.buffer.equals(timed.buffer), 'index+time 不应退化成 index');
 });
 
 test('composeSheet: 帧数超过格位直接抛错', () => {

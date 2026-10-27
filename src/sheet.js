@@ -13,7 +13,7 @@
 
 import { spawn } from 'node:child_process';
 
-import { DEFAULT_FFMPEG } from './probe.js';
+import { DEFAULT_FFMPEG, endEdge } from './probe.js';
 
 export const BACKGROUND = [18, 18, 20];
 export const PAD_FILL = [42, 42, 46];
@@ -39,6 +39,27 @@ export const DIGITS = {
 
 export const DIGIT_W = 5;
 export const DIGIT_H = 7;
+
+/** 时间码额外需要的两个字形；其余仍复用 DIGITS。 */
+export const EXTRA_GLYPHS = {
+  ':': ['00000', '00100', '00100', '00000', '00100', '00100', '00000'],
+  '.': ['00000', '00000', '00000', '00000', '00000', '00110', '00110'],
+};
+
+export const GLYPHS = { ...DIGITS, ...EXTRA_GLYPHS };
+
+/** 烧进画面的紧凑时间码：>=1h 用 H:MM:SS，否则 MM:SS。 */
+export function formatBadgeTime(seconds) {
+  const v = Number(seconds);
+  if (!Number.isFinite(v) || v < 0) return '';
+  const total = Math.round(v);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const mm = String(m).padStart(2, '0');
+  const ss = String(s).padStart(2, '0');
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
 
 /**
  * 画布尺寸：整图面积 <= budget，格宽高按剩余空间均分。
@@ -92,7 +113,7 @@ export function drawGlyphs(buf, width, height, text, x, y, scale, color) {
       cursor += (DIGIT_W + 1) * scale;
       continue;
     }
-    const glyph = DIGITS[ch];
+    const glyph = GLYPHS[ch];
     if (!glyph) continue;
     for (let row = 0; row < DIGIT_H; row++) {
       for (let col = 0; col < DIGIT_W; col++) {
@@ -122,15 +143,29 @@ export function badgeScale(cellH, cellW = Infinity, digits = 1, ratio = 0.18) {
  * 在一格里画编号徽标（黑底 + 黄字，左上角固定位置）。
  * 不透明优先：半透明底块在白板/雪景上会直接消失（实测见设计方案 §3.5）。
  */
-export function drawBadge(buf, width, height, x, y, cellW, cellH, label, ratio = 0.18) {
-  const digits = String(label).length;
-  const scale = badgeScale(cellH, cellW, digits, ratio);
+export function drawBadge(buf, width, height, x, y, cellW, cellH, label, ratio = 0.18, timeText = null) {
+  const text = String(label);
+  const scale = badgeScale(cellH, cellW, text.length, ratio);
   const pad = Math.max(2, Math.round(cellH * 0.025));
-  const textW = digits * (DIGIT_W + 1) * scale - scale;
-  const textH = DIGIT_H * scale;
-  fillRect(buf, width, height, x, y, textW + pad * 2, textH + pad * 2, BADGE_BG, BADGE_ALPHA);
-  drawGlyphs(buf, width, height, label, x + pad, y + pad, scale, BADGE_FG);
-  return { w: textW + pad * 2, h: textH + pad * 2 };
+  const labelW = text.length * (DIGIT_W + 1) * scale - scale;
+  const labelH = DIGIT_H * scale;
+  const clock = timeText ? String(timeText) : '';
+  const clockScale = clock
+    ? Math.max(1, Math.min(Math.round(scale * 0.6),
+      Math.floor((cellW - pad * 2) / (clock.length * (DIGIT_W + 1)))))
+    : 0;
+  const clockW = clock ? clock.length * (DIGIT_W + 1) * clockScale - clockScale : 0;
+  const clockH = clock ? DIGIT_H * clockScale : 0;
+  const gap = clock ? Math.max(1, Math.round(pad * 0.6)) : 0;
+  const boxW = Math.max(labelW, clockW) + pad * 2;
+  const boxH = labelH + pad * 2 + (clock ? gap + clockH : 0);
+  fillRect(buf, width, height, x, y, boxW, boxH, BADGE_BG, BADGE_ALPHA);
+  drawGlyphs(buf, width, height, text, x + pad, y + pad, scale, BADGE_FG);
+  if (clock) {
+    drawGlyphs(buf, width, height, clock,
+      x + pad, y + pad + labelH + gap, clockScale, BADGE_FG);
+  }
+  return { w: boxW, h: boxH };
 }
 
 /** 空位：灰底 + 居中横杠，且绝对不编号 */
@@ -174,7 +209,10 @@ export function composeSheet(opts) {
       continue;
     }
     blit(buf, width, height, x, y, cellW, cellH, frame.buffer);
-    if (burn !== 'none') drawBadge(buf, width, height, x + 2, y + 2, cellW, cellH, frame.index, badgeRatio);
+    if (burn !== 'none') {
+      const timeText = burn === 'index+time' ? formatBadgeTime(frame.time) : null;
+      drawBadge(buf, width, height, x + 2, y + 2, cellW, cellH, frame.index, badgeRatio, timeText || null);
+    }
   }
   return { buffer: buf, width, height, cellW, cellH };
 }
@@ -322,7 +360,7 @@ export function sharpness(buf, width, height) {
 export async function extractSharpest(opts) {
   const {
     input, at, dur, cellW, cellH, ffmpegPath = DEFAULT_FFMPEG,
-    candidates = 3, margin = 0.25, timeoutMs,
+    candidates = 3, margin = 0.25, timeoutMs, sourceEnd, fps,
   } = opts;
   const safeDur = Math.max(0, dur || 0);
   const pad = Math.min(margin, safeDur / 3);
@@ -333,10 +371,31 @@ export async function extractSharpest(opts) {
   } else {
     for (let i = 0; i < candidates; i++) times.push(at + pad + (span * i) / (candidates - 1));
   }
-  const picked = await Promise.all(times.map((t) =>
-    extractFrameRaw({ input, at: t, cellW, cellH, ffmpegPath, timeoutMs })
+  const settled = await Promise.allSettled(times.map((t) =>
+    extractFrameRaw({ input, at: t, cellW, cellH, ffmpegPath, timeoutMs, sourceEnd, fps })
       .then((f) => ({ ...f, sharp: sharpness(f.buffer, cellW, cellH) }))));
-  return picked.reduce((best, cur) => (cur.sharp > best.sharp ? cur : best));
+  const picked = settled.filter((x) => x.status === 'fulfilled').map((x) => x.value);
+  if (picked.length > 0) {
+    const best = picked.reduce((a, b) => (b.sharp > a.sharp ? b : a));
+    return { ...best, candidateFailures: settled.length - picked.length };
+  }
+  const fallbackAt = safeDur > 0 ? at + safeDur / 2 : at;
+  try {
+    const frame = await extractFrameRaw({
+      input, at: fallbackAt, cellW, cellH, ffmpegPath, timeoutMs, sourceEnd, fps,
+    });
+    return {
+      ...frame,
+      sharp: sharpness(frame.buffer, cellW, cellH),
+      candidateFailures: settled.length,
+    };
+  } catch (error) {
+    const first = settled.find((x) => x.status === 'rejected')?.reason;
+    throw new Error(
+      `no candidate frame could be decoded at ${at.toFixed(2)}s ` +
+      `(${first?.message ?? error.message})`,
+    );
+  }
 }
 
 /* ---------------------------------------------------------------- ffmpeg IO */
@@ -368,24 +427,30 @@ const PTS_RE = /pts_time:([0-9.]+)/g;
 /**
  * 取一帧，返回 rawvideo rgb24（正好 cellW*cellH*3 字节）与真实时刻。
  * @param {{input:string, at:number, dur?:number, cellW:number, cellH:number,
- *          ffmpegPath?:string, mode?:'mid'|'thumb', timeoutMs?:number}} opts
+ *          ffmpegPath?:string, mode?:'mid'|'thumb', timeoutMs?:number,
+ *          sourceEnd?:number, fps?:number}} opts
  */
 export async function extractFrameRaw(opts) {
   const {
     input, at, dur, cellW, cellH, ffmpegPath = DEFAULT_FFMPEG, mode = 'mid', timeoutMs,
+    sourceEnd, fps,
   } = opts;
   const filter = coverFilter(cellW, cellH);
+  const safeSeek = (t) => {
+    if (!(sourceEnd > 0)) return t;
+    return Math.min(t, Math.max(0, sourceEnd - endEdge(fps)));
+  };
   let args;
   let seek;
   if (mode === 'thumb' && dur > 0) {
     // 段内取"直方图最接近该段均值"的帧：对溶解/过曝/空镜比硬取中点稳
-    seek = at;
+    seek = safeSeek(at);
     const n = Math.max(2, Math.min(300, Math.round(dur * 25)));
-    args = ['-hide_banner', '-v', 'info', '-nostdin', '-ss', String(at), '-t', String(dur), '-i', input,
+    args = ['-hide_banner', '-v', 'info', '-nostdin', '-ss', String(seek), '-t', String(dur), '-i', input,
       '-an', '-sn', '-vf', `thumbnail=n=${n},showinfo,${filter}`, '-frames:v', '1',
       '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'];
   } else {
-    seek = dur > 0 ? at + dur / 2 : at;
+    seek = safeSeek(dur > 0 ? at + dur / 2 : at);
     args = ['-hide_banner', '-v', 'error', '-nostdin', '-ss', String(seek), '-i', input,
       '-an', '-sn', '-vf', filter, '-frames:v', '1',
       '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'];
@@ -398,7 +463,7 @@ export async function extractFrameRaw(opts) {
   let actual = seek;
   if (mode === 'thumb') {
     const hits = [...stderr.matchAll(PTS_RE)].map((m) => Number(m[1]));
-    if (hits.length > 0) actual = at + hits[hits.length - 1];
+    if (hits.length > 0) actual = seek + hits[hits.length - 1];
   }
   return { buffer: Buffer.from(stdout.subarray(0, need)), t: actual };
 }

@@ -29,6 +29,11 @@ test('segmentsFromCuts: 无切点时只有一段', () => {
   assert.deepEqual(segmentsFromCuts(8, []), [[0, 8]]);
 });
 
+test('segmentsFromCuts: 窗口短于 minLen 时保留整窗，不返回空数组', () => {
+  assert.deepEqual(segmentsFromCuts(0.2, [], 0.4), [[0, 0.2]]);
+  assert.deepEqual(segmentsFromCuts(0.2, [0.1], 0.4, 10), [[10, 10.2]]);
+});
+
 test('segmentsFromCuts: duration 非正抛错', () => {
   assert.throws(() => segmentsFromCuts(0, [1]), RangeError);
 });
@@ -100,9 +105,10 @@ test('fitSegments: 不传 minGap 时行为与旧版一致', () => {
   assert.deepEqual(fitSegments([[0, 0.3], [0.3, 1]], 2), [[0, 0.3], [0.3, 1]]);
 });
 
-test('fitSegments: k 非法抛错', () => {
+test('fitSegments: k 非法抛错，空输入给出明确错误', () => {
   assert.throws(() => fitSegments([[0, 1]], 0), RangeError);
   assert.throws(() => fitSegments([[0, 1]], 2.5), RangeError);
+  assert.throws(() => fitSegments([], 2), /segs must not be empty/);
 });
 
 test('fitSegments: 段太短时停止拆分，不死循环', () => {

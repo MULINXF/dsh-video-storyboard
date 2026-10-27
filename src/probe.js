@@ -15,10 +15,10 @@ const run = promisify(execFile);
 export const DEFAULT_FFMPEG = process.env.DSH_FFMPEG_PATH || process.env.FFMPEG_PATH || 'ffmpeg';
 export const DEFAULT_FFPROBE = process.env.DSH_FFPROBE_PATH || process.env.FFPROBE_PATH || 'ffprobe';
 
-/** "25/1" | "30000/1001" → number | null */
+/** "25/1" | "30000/1001" | "32:27" → number | null */
 export function parseRational(value) {
   if (typeof value !== 'string' || value.trim() === '') return null;
-  const [num, den = '1'] = value.split('/');
+  const [num, den = '1'] = value.trim().split(/[\/:]/);
   const a = Number(num);
   const b = Number(den);
   if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return null;
@@ -36,6 +36,10 @@ export function normalizeRotation(raw) {
   return Math.round(a);
 }
 
+/** 显示比例：像素宽高比 × SAR。height 无效时退回 16:9。 */
+export const displayAspect = (width, height, sar = 1) =>
+  height > 0 ? (width / height) * (sar > 0 ? sar : 1) : 16 / 9;
+
 /** 旋转 90/270 时，观众看到的宽高与编码宽高互换 */
 export function uprightSize(codedWidth, codedHeight, rotation) {
   return Math.abs(rotation) % 180 === 90
@@ -43,8 +47,8 @@ export function uprightSize(codedWidth, codedHeight, rotation) {
     : { width: codedWidth, height: codedHeight };
 }
 
-/** 末尾避让量：等分采样最后一帧若取 duration，会落在"不存在的帧"上 */
-export const endEdge = (fps) => (fps > 0 ? 0.5 / fps : 0.02);
+/** 末尾避让量：等分采样最后一帧若取 duration，会落在"不存在的帧"上。 */
+export const endEdge = (fps) => (fps > 0 ? 1.25 / fps : 0.05);
 
 export async function probeVideo(input, { ffprobePath = DEFAULT_FFPROBE } = {}) {
   const { stdout } = await run(
@@ -71,7 +75,11 @@ export async function probeVideo(input, { ffprobePath = DEFAULT_FFPROBE } = {}) 
   );
   const coded = { width: Number(video.width) || 0, height: Number(video.height) || 0 };
   const { width, height } = uprightSize(coded.width, coded.height, rotation);
-  const fps = parseRational(video.r_frame_rate) ?? parseRational(video.avg_frame_rate) ?? 25;
+  // avg_frame_rate 才是平均帧率；r_frame_rate 在 VFR 素材上可能是最大瞬时帧率。
+  const fps = parseRational(video.avg_frame_rate) ?? parseRational(video.r_frame_rate) ?? 25;
+  // 非方形像素（anamorphic / DVD）必须把 SAR 计入显示比例；只拿 width/height 会拉扁。
+  const sar = parseRational(video.sample_aspect_ratio) ?? 1;
+  const aspect = displayAspect(width, height, sar);
 
   return {
     duration,
@@ -80,7 +88,8 @@ export async function probeVideo(input, { ffprobePath = DEFAULT_FFPROBE } = {}) 
     coded,
     rotation,
     fps,
-    aspect: height > 0 ? width / height : 16 / 9,
+    sar,
+    aspect,
     videoCodec: video.codec_name ?? 'unknown',
     container: parsed?.format?.format_name ?? 'unknown',
     hasAudio: Boolean(audio),

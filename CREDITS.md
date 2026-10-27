@@ -39,7 +39,7 @@
 
 - README 致谢段：
   > Speech recognition powered by **SenseVoiceSmall**, developed by the **FunAudioLLM team at Alibaba**, used under the FunASR Model License v1.1. This project does not redistribute the model weights.
-- `manifest.audio.model` 字段保留原始模型名，不改写、不缩写。
+- `manifest.transcript.model` 字段保留原始模型名，不改写、不缩写。
 
 另注：该协议 §4.2 禁止对上游进行无端诋毁或恶意抹黑，违反将自动终止全部授权。因此本项目的对比文档只描述**取舍与适用场景**，不作贬损性评价。
 

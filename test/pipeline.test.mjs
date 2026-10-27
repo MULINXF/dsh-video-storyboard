@@ -6,13 +6,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { runStoryboard, formatManifest, saveStoryboards } from '../src/pipeline.js';
-import { DEFAULT_FFMPEG } from '../src/probe.js';
+import { DEFAULT_FFMPEG, probeVideo } from '../src/probe.js';
 
 const run = promisify(execFile);
 let hasFfmpeg = false;
@@ -29,6 +29,18 @@ async function makeFixture(dir) {
     '-map', '[v]', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', out,
   );
   await run(DEFAULT_FFMPEG, args);
+  return out;
+}
+
+/** 720×480 的 4:3 SAR，显示比例应为 16:9。 */
+async function makeAnamorphic(dir) {
+  const out = join(dir, 'anamorphic.mp4');
+  await run(DEFAULT_FFMPEG, [
+    '-hide_banner', '-v', 'error', '-y',
+    '-f', 'lavfi', '-i', 'testsrc2=size=320x240:rate=25:duration=1',
+    '-vf', 'setsar=4/3',
+    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', out,
+  ]);
   return out;
 }
 
@@ -96,6 +108,57 @@ test('e2e: 时间窗只覆盖窗口内，清单首行写明 window', async (t) =
   assert.match(text, /unlabeled cells are padding/);
 });
 
+test('e2e: 小于 0.4s 的窗口不崩，窗口终点不越过原片', async (t) => {
+  if (!hasFfmpeg) return t.skip('ffmpeg not on PATH');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-pipe-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const file = await makeFixture(dir);
+
+  const r = await runStoryboard({
+    input: file, from: 5.95, to: 6, cells: 2,
+    transcript: 'off', audioStrip: false, encode: false, cache: false,
+  });
+  assert.equal(r.window.to, 6);
+  assert.ok(r.sheets.length >= 1);
+  assert.ok(r.sheets[0].cells.length >= 1);
+});
+
+test('e2e: badgeRatio=0 等价于 burn=none；index+time 生效', async (t) => {
+  if (!hasFfmpeg) return t.skip('ffmpeg not on PATH');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-pipe-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const file = await makeFixture(dir);
+
+  const plain = await runStoryboard({
+    input: file, cells: 2, badgeRatio: 0,
+    transcript: 'off', audioStrip: false, encode: false, cache: false,
+  });
+  assert.equal(plain.plan.burn, 'none');
+
+  const timed = await runStoryboard({
+    input: file, cells: 2, burn: 'index+time',
+    transcript: 'off', audioStrip: false, encode: false, cache: false,
+  });
+  const indexOnly = await runStoryboard({
+    input: file, cells: 2, burn: 'index',
+    transcript: 'off', audioStrip: false, encode: false, cache: false,
+  });
+  assert.equal(timed.plan.burn, 'index+time');
+  assert.ok(!timed.sheets[0].buffer.equals(indexOnly.sheets[0].buffer),
+    'index+time 必须真的改变像素');
+});
+
+test('e2e: 非方形像素的 SAR 计入显示比例', async (t) => {
+  if (!hasFfmpeg) return t.skip('ffmpeg not on PATH');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-pipe-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const file = await makeAnamorphic(dir);
+
+  const info = await probeVideo(file);
+  assert.ok(Math.abs(info.sar - 4 / 3) < 0.01, `SAR 应为 4:3，实得 ${info.sar}`);
+  assert.ok(Math.abs(info.aspect - 16 / 9) < 0.01, `显示比例应为 16:9，实得 ${info.aspect}`);
+});
+
 test('e2e: saveStoryboards 落盘（多张时带序号）', async (t) => {
   if (!hasFfmpeg) return t.skip('ffmpeg not on PATH');
   const dir = await mkdtemp(join(tmpdir(), 'dsh-pipe-'));
@@ -104,9 +167,12 @@ test('e2e: saveStoryboards 落盘（多张时带序号）', async (t) => {
 
   const r = await runStoryboard({ input: file, cells: 4, sheets: 2 });
   assert.equal(r.sheets.length, 2);
-  const paths = await saveStoryboards(r, join(dir, 'out.png'));
+  const paths = await saveStoryboards(r, join(dir, 'out.jpg'), { quality: 4 });
   assert.equal(paths.length, 2);
-  assert.ok(paths[1].endsWith('out-2.png'));
+  assert.ok(paths[0].endsWith('out.jpg'), `第一张保留原名，实得 ${paths[0]}`);
+  assert.ok(paths[1].endsWith('out-2.jpg'), `第二张应带序号，实得 ${paths[1]}`);
+  const files = (await readdir(dir)).filter((name) => name.startsWith('out'));
+  assert.deepEqual(files.sort(), ['out-2.jpg', 'out.jpg'], '两张图都必须真的落盘');
 });
 
 test('e2e: 第二次调用命中缓存（切点不重扫）', async (t) => {

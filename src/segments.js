@@ -20,6 +20,9 @@ export function segmentsFromCuts(duration, cuts, minLen = 0.4, from = 0) {
   for (let i = 0; i < bounds.length - 1; i++) {
     if (bounds[i + 1] - bounds[i] >= minLen) segs.push([bounds[i], bounds[i + 1]]);
   }
+  // 窗口本身短于 minLen 时，仍然要保留一个覆盖整窗的段；否则后续 fitSegments
+  // 会拿到空数组并崩掉。minLen 是过滤碎镜头的偏好，不是丢弃整段视频的理由。
+  if (segs.length === 0 && duration > 0) return [[from, from + duration]];
   return mergeTail(segs);
 }
 
@@ -81,6 +84,7 @@ function medianDuration(segs) {
 export function fitSegments(segs, k, { minGap = 0 } = {}) {
   if (!Number.isInteger(k) || k < 1) throw new RangeError(`k must be a positive integer, got ${k}`);
   let out = segs.map((s) => [Number(s[0]), Number(s[1])]);
+  if (out.length === 0) throw new RangeError('segs must not be empty');
   // minGap 是"偏好"，不能超过素材本身能提供的粒度：
   // 一条全是 1s 短镜头的片子，硬按 1.2s 合并会把 6 段并成 3 段，反而凑不够格数。
   const gap = minGap > 0 ? Math.min(minGap, Math.max(0.2, medianDuration(out) * 0.9)) : 0;
