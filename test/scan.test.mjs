@@ -65,6 +65,19 @@ test('scorePair: 色相跨 0° 时按环形算（红色→品红不该算成巨�
   assert.ok(across > 20, `真正的远色相应该明显更大，实得 ${across}`);
 });
 
+test('scorePair: 近灰像素的色相噪声不该算成切点', () => {
+  // 肉眼完全一样的两帧：色相被编码噪声甩到色环两端，但两者饱和度几乎为 0
+  const one = (r, g, b) => frameToHsv(new Uint8Array([r, g, b]));
+  const s1 = scorePair(one(128, 128, 127), one(128, 127, 128));
+  assert.ok(s1 < 1, `近灰的变化应接近 0，实得 ${s1.toFixed(2)}`);
+});
+
+test('scorePair: 高饱和度的色相变化仍然要算', () => {
+  const one = (r, g, b) => frameToHsv(new Uint8Array([r, g, b]));
+  const s1 = scorePair(one(255, 0, 0), one(0, 255, 0));
+  assert.ok(s1 > 20, `饱和色的换色必须还能抓到，实得 ${s1.toFixed(2)}`);
+});
+
 test('scorePair: 同亮度换色是 ffmpeg 的死角，本实现能抓住', () => {
   // teal(15,118,110) → green(21,128,61)：实测亮度差 0.8%，色相差 24/255
   const a = frameToHsv(new Uint8Array([15, 118, 110]));

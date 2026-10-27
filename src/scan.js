@@ -76,7 +76,12 @@ export function scorePair(prev, cur) {
     // 于是夜景霓虹、日落、色轮转场这些地方会凭空多出切点。
     const dh = Math.abs(cur[i] - prev[i]);
     const hueDiff = Math.min(dh, 255 - dh);
-    sum += hueDiff * HUE_WEIGHT
+    // 低饱和像素的色相没有意义：近灰的色相会被编码噪声甩到色环另一端。
+    // 实测 rgb(128,128,127) → rgb(128,127,128)（肉眼完全一样）色相差 85、整帧分数 28，
+    // 而常用阈值只有 12–58 —— 于是"画面没变"被记成一次切镜。
+    // 用两帧中较低的那个饱和度给色相项降权：灰的地方色相说了不算，亮色地方照常。
+    const hueWeight = Math.min(cur[i + 1], prev[i + 1]) / 255;
+    sum += hueDiff * hueWeight * HUE_WEIGHT
       + Math.abs(cur[i + 1] - prev[i + 1]) * SAT_WEIGHT
       + Math.abs(cur[i + 2] - prev[i + 2]) * VAL_WEIGHT;
   }

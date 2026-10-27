@@ -20,6 +20,10 @@ export function segmentsFromCuts(duration, cuts, minLen = 0.4, from = 0) {
   for (let i = 0; i < bounds.length - 1; i++) {
     if (bounds[i + 1] - bounds[i] >= minLen) segs.push([bounds[i], bounds[i + 1]]);
   }
+  // 窗口本身就比 minLen 还短（例如模型要 zoom 看 0.2 秒）：
+  // 所有段都过不了长度门槛 → 这里会返回空数组，下游 fitSegments 解构 undefined 直接崩。
+  // 短窗口本来就只能是一段，原样给它一整段。
+  if (segs.length === 0 && duration > 0) return [[from, from + duration]];
   return mergeTail(segs);
 }
 

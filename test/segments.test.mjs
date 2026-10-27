@@ -109,3 +109,16 @@ test('fitSegments: 段太短时停止拆分，不死循环', () => {
   const out = fitSegments([[0, 0.3]], 10);
   assert.ok(out.length <= 2, `不应把 0.3s 拆成 10 份，实得 ${out.length}`);
 });
+
+test('segmentsFromCuts: 窗口比 minLen 还短时给一整段（不再返回空数组）', () => {
+  const segs = segmentsFromCuts(0.25, [], 0.4);
+  assert.equal(segs.length, 1, '短窗口应该是一段，而不是空数组');
+  assert.deepEqual(segs[0], [0, 0.25]);
+});
+
+test('segmentsFromCuts: 短窗口 + from 偏移也要正常（zoom 到 0.2 秒不该崩）', () => {
+  const segs = segmentsFromCuts(0.2, [5.98], 0.4, 5.95);
+  assert.equal(segs.length, 1);
+  assert.ok(Math.abs(segs[0][0] - 5.95) < 1e-9);
+  assert.ok(Math.abs(segs[0][1] - 6.15) < 1e-9);
+});

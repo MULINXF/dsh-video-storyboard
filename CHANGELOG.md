@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+**Two bugs from issue #1 (ggfgfgf-on) that I had wrongly declared "already absorbed".**
+
+- **Windows shorter than 0.4 s crashed.** `segmentsFromCuts` dropped every segment below `minLen`, so a
+  0.2 s zoom returned `[]` and `fitSegments` destructured `undefined`. `video_zoom({ from: 12.0, to: 12.2 })`
+  was a straight crash. A sub-0.4 s window is one segment, and now returns one.
+- **Low-saturation pixels invented cuts.** Hue is meaningless near grey — compression noise throws it to the
+  other side of the wheel. `rgb(128,128,127) → rgb(128,127,128)`, visually identical, scored **28.3**
+  against thresholds of 12–58. The hue term is now weighted by the lower of the two saturations.
+  Measured: the talking-head clip went from **139 → 121 cuts** (−13 %), the colour-heavy PV was unchanged.
+
 **Pixel aspect ratio and VFR frame rate.** Two probe fixes taken from PR #2 (ggfgfgf-on), reimplemented
 here: `aspect` was computed as coded width / coded height, which is wrong for non-square pixels (a
 1440×1080 DVD-era file with SAR 4:3 *displays* as 16:9 — our grid would have squashed every face). It now
