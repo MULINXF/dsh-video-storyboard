@@ -11,6 +11,17 @@
 
 ### Added
 
+- **Burst re-scan.** A coarse pass merges any two cuts closer than `scanGap` (0.35 s), so shots shorter than
+  that are invisible — and montage lives entirely below it. Windows the density curve already flags as
+  bursts are now re-scanned with `scanGap: 0.12` and a threshold taken from the window's own low decile.
+  Measured on a 25 s clip (12 s slow / 3 s of 18 shots / 10 s slow): **4 shots in the burst → 15**, while a
+  slow hand movement in the same clip was correctly *not* refined (its cuts averaged score 18 vs 59).
+
+  Three guards, each from a measurement rather than a guess: the fine scan must find more cuts, it must not
+  be classified as `motion`, and its cuts must average ≥ 25 in score. Windows longer than 8 s are skipped —
+  at 23 s the rescan cost a second pass and produced 28 → 29 cuts, which is not a burst, it is curve tail.
+  On our two reference clips the counts are unchanged (40 / 121), so this only fires where it should.
+
 - `video_storyboard({ scanGap })` — the minimum spacing between detected cuts, default 0.35 s. It is a
   different knob from `minGap` (which merges cells). Fast material needs it: the same 3 s / 18-shot clip
   yields **3 cuts at the default** and **16 cuts at `scanGap: 0.12`**. Until this, the scanner had no way

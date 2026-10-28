@@ -149,6 +149,14 @@ export function assessDegraded({ span, cuts, hotRatio }) {
   return medianShot < 0.5 && hotRatio > 0.3 ? 'motion' : null;
 }
 
+/** 取分位（0..1）。用于"这片就是很快"时的低阈值：按片中自己的分数分布定，而不是全局倍数。 */
+export function quantile(scores, q) {
+  if (!Array.isArray(scores) || scores.length === 0) return 0;
+  const s = [...scores].sort((a, b) => a - b);
+  const i = Math.min(s.length - 1, Math.max(0, Math.floor(s.length * q)));
+  return s[i];
+}
+
 export function scanSummary(scores) {
   if (!Array.isArray(scores) || scores.length === 0) {
     return { p50: 0, p90: 0, p95: 0, p99: 0, max: 0, frames: 0 };
@@ -236,9 +244,13 @@ export function scanShots(opts) {
         return;
       }
       const scores = stats.map((s) => s.score);
+      // 'auto-low'：按本片段自己的低分位取阈值。爆点细扫用这个 —— 快闪素材里
+      // "每秒 6 刀"是常态，用全片平均节奏推出来的阈值会把它们全挡在门外。
       const used = threshold === 'auto'
         ? autoThreshold(scores, { duration: end !== undefined ? end - start : frame / fps })
-        : threshold;
+        : threshold === 'auto-low'
+          ? Math.max(4, quantile(scores, 0.10))
+          : threshold;
       // 阈值用**严格大于 + 一个极小 ε**：autoThreshold 落在某个分位上时，
       // 一大堆同分帧会整簇被 `>=` 拖进来（实测过一份素材因此多出三成切点）。
       // 再用目标个数做上限，保证"同分整簇"不会把节奏带偏。

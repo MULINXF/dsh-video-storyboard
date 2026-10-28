@@ -84,6 +84,7 @@ export async function runStoryboard(opts) {
     // 扫描时的"两刀最短间隔"。和上面的 minGap（格子合并）不是一回事：
     // 快闪素材要把这个调小才数得出镜头数，否则 3 秒 18 镜会被压成 4 刀。
     scanGap = 0.35,
+    refineBursts = true,
     adaptive = true,
     pick = 'sharp',
     burn = 'index',
@@ -151,6 +152,16 @@ export async function runStoryboard(opts) {
       minGap: scanGap, ffmpegPath, onProgress,
     }), { enabled: cache });
   if (cache && !scan.cached && !precomputed) await pruneCache();
+
+  // ---- 爆点细扫（见 refineBurstCuts 注释：粗扫看不见 0.35s 以下的刀）
+  let cuts = scan.cuts;
+  let refinedBursts = [];
+  if (refineBursts && !precomputed && !textOnly) {
+    const r = await refineBurstCuts({
+      input, fps: info.fps, cuts, winStart, winDur, ffmpegPath,
+    }).catch(() => null);
+    if (r) { cuts = r.cuts; refinedBursts = r.refined; }
+  }
 
   // ---- 音频测量（零模型：响度 + 静音）。先做，因为静音位置要用来切 ASR 请求。
   const needAudio = info.hasAudio && !textOnly && (audioStrip !== false || transcript !== 'off');
@@ -281,7 +292,7 @@ export async function runStoryboard(opts) {
   if (cells === 0) {
     suggestion = suggest({
       duration: winDur,
-      cuts: scan.cuts.length,
+      cuts: cuts.length,
       motion: scan.summary.p90,
       aspect: info.aspect,
       speechRate,
@@ -303,14 +314,14 @@ export async function runStoryboard(opts) {
       meanLufs: Number.isFinite(audio?.mean) ? +audio.mean.toFixed(1) : null,
       speechRate: +speechRate.toFixed(2),
       motion: +(Number(scan.summary?.p90) || 0).toFixed(1),
-      cuts: scan.cuts.length,
+      cuts: cuts.length,
       hasSubtitle: Boolean(info.hasSubtitle),
     },
     thresholds: { ...PLAN_THRESHOLDS },
   };
 
   // 两条路：自适应按密度分配格位（快切区多给格），否则退回"并段到 k 格"
-  const relCuts = scan.cuts.map((c) => c.t - winStart);
+  const relCuts = cuts.map((c) => c.t - winStart);
   let cellRanges;
   if (adaptive && relCuts.length > 0) {
     cellRanges = planCellRanges({
@@ -346,7 +357,7 @@ export async function runStoryboard(opts) {
     return {
       info,
       window: { from: winStart, to: winStart + winDur, duration: winDur },
-      cuts: scan.cuts,
+      cuts,
       summary: scan.summary,
       threshold: scan.threshold,
     ...(scan.degraded ? { degraded: scan.degraded } : {}),
@@ -364,6 +375,8 @@ export async function runStoryboard(opts) {
       cells: cellsMeta,
       textOnly: true,
       ...(sourceInfo ? { source: sourceInfo } : {}),
+    // 哪些窗口被细扫过、粗扫/细扫各数出多少刀 —— 清单要据此说明"这段的镜头数可信"
+    ...(refinedBursts.length ? { refinedBursts } : {}),
       totalDuration: +cellRanges.reduce((n2, r) => n2 + (r.to - r.from), 0).toFixed(3),
     };
   }
@@ -390,7 +403,7 @@ export async function runStoryboard(opts) {
       frames.push({ buffer: frame.buffer, index });
       const text = aligned[gi] ?? null;
       // 这一格里切了几刀 —— 快闪蒙太奇的"速度"就是这个数字，模型不用自己数刻度
-      const cellCuts = scan.cuts.filter((c) => c.t >= a && c.t < b).length;
+      const cellCuts = cuts.filter((c) => c.t >= a && c.t < b).length;
       cellMeta.push({
         i: index,
         sheet: si + 1,
@@ -410,7 +423,7 @@ export async function runStoryboard(opts) {
       // 所以同时受格高的 40% 约束。
       const stripH = Math.max(24, Math.min(Math.round(width * 0.055), Math.round(cellH * 0.28)));
       sheet = addAudioStrip(sheet, {
-        loudness: stripAudio, silences: stripAudio.silences, cuts: scan.cuts.map((c) => c.t),
+        loudness: stripAudio, silences: stripAudio.silences, cuts: cuts.map((c) => c.t),
         window: { from: winStart, to: winStart + winDur }, stripH,
       });
     }
@@ -428,20 +441,22 @@ export async function runStoryboard(opts) {
   // 失败不影响结果（记忆是锦上添花）。
   // 必须 await：不 await 的话下一次 probe 可能读不到这一笔（实测踩到，少了一整段）
   await remember(info, {
-    from: winStart, to: winStart + winDur, cells: cellRanges.length, cuts: scan.cuts.length,
+    from: winStart, to: winStart + winDur, cells: cellRanges.length, cuts: cuts.length,
   }).catch(() => {});
 
   return {
     info,
     provenance,
     window: { from: winStart, to: winStart + winDur, duration: winDur },
-    cuts: scan.cuts,
+    cuts,
     summary: scan.summary,
     threshold: scan.threshold,
     ...(scan.degraded ? { degraded: scan.degraded } : {}),
     cached: Boolean(scan.cached),
     // 链接来源的元信息（本地文件时没有这一段）。直链不在里面，那是临时凭证。
     ...(sourceInfo ? { source: sourceInfo } : {}),
+    // 哪些窗口被细扫过、粗扫/细扫各数出多少刀 —— 清单要据此说明"这段的镜头数可信"
+    ...(refinedBursts.length ? { refinedBursts } : {}),
     // 有高清直链却有格子落了回来 —— 要报，否则"这格怎么这么糊"没有解释
     ...(fallbacks > 0 ? { frameFallbacks: fallbacks } : {}),
     audio: stripAudio
@@ -475,6 +490,48 @@ export async function runStoryboard(opts) {
     sheets: out,
     totalDuration,
   };
+}
+
+/**
+ * 爆点细扫：粗扫的 `scanGap` 默认 0.35s，比它更密的刀会被并掉 —— 而快闪恰好全在 0.35s 以下。
+ * 所以对"已经被粗扫认定为爆发"的窗口再扫一遍：更小的间隔 + 按本段自己的低分位取阈值。
+ *
+ * 只在**细扫确实数出更多刀、且没有被判成运镜**时采纳，否则保留粗扫结果。
+ *
+ * @returns {{cuts:Array, refined:Array<{from:number,to:number,coarse:number,fine:number}>}}
+ */
+const MIN_REFINE_SCORE = 25;
+
+export async function refineBurstCuts({
+  input, fps, cuts, winStart, winDur, scanGap = 0.12, ffmpegPath, maxBursts = 3, minCoarse = 3,
+  maxBurstSpan = 8,
+}) {
+  const bursts = findBursts(cuts.map((c) => c.t - winStart), winDur).slice(0, maxBursts);
+  let out = cuts.slice();
+  const refined = [];
+  for (const b of bursts) {
+    const from = winStart + b.from;
+    const to = winStart + b.to;
+    if (to - from < 1) continue;
+    // 爆点是"一小段"，不是"后半部"。23 秒的窗口按 0.12s 间隔重扫既贵又没用（实测 28→29 刀），
+    // 这种长窗口通常是密度曲线的拖尾，不是真快闪。
+    if (to - from > maxBurstSpan) continue;
+    const coarse = out.filter((c) => c.t >= from && c.t < to).length;
+    if (coarse < minCoarse) continue;
+    const fine = await scanShots({
+      input, fps, start: from, end: to, threshold: 'auto-low', minGap: scanGap, ffmpegPath,
+    });
+    if (fine.degraded === 'motion') continue;     // 连续运镜，不是剪辑，别细扫
+    if (fine.cuts.length <= coarse) continue;      // 没数出更多，白扫
+    // 分数幅度才是"切"和"动"的分界线：实测同一支片里
+    //   真快闪段（18 镜/3 秒）刀均分 59，手掌缓慢运镜 18 —— 两者的"刀数"都很密，
+    //   但运镜每帧只变一点点。低于 25 的一律不当剪辑。
+    const meanScore = fine.cuts.reduce((a, c) => a + (c.score ?? 0), 0) / Math.max(1, fine.cuts.length);
+    if (meanScore < MIN_REFINE_SCORE) continue;
+    out = out.filter((c) => !(c.t >= from && c.t < to)).concat(fine.cuts).sort((a, b) => a.t - b.t);
+    refined.push({ from: +from.toFixed(2), to: +to.toFixed(2), coarse, fine: fine.cuts.length });
+  }
+  return { cuts: out, refined };
 }
 
 /** 把结果编码成 PNG 落盘（CLI 用；插件走附件服务，不落盘） */
@@ -778,6 +835,14 @@ export function formatManifest(result, {
   if (result.degraded === 'motion') {
     lines.push('cut count unreliable here: median shot under 0.5s with many frames above the threshold — ' +
       'this is likely continuous camera motion being cut into pieces. Read the pictures; do not quote cuts=N as pacing.');
+  }
+
+  // 细扫过的窗口：镜头数才是可信的，必须说出来（粗扫看不见 0.35s 以下的刀）
+  if (result.refinedBursts?.length) {
+    const r = result.refinedBursts
+      .map((b) => `${tc(b.from)}-${tc(b.to)} ${b.fine} shots (coarse saw ${b.coarse})`)
+      .join(', ');
+    lines.push(`re-scanned at 0.12s granularity: ${r} — these counts include cuts the coarse pass merged away.`);
   }
 
   // 快剪爆发点：只给"密度"和"每格几刀"还不够——模型不知道"哪一段是连拍的"。

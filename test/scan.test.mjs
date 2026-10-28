@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  assessDegraded, autoThreshold, DEFAULT_THRESHOLD, frameToHsv, rgbToHsv, scanSummary, scorePair,
+  assessDegraded, autoThreshold, DEFAULT_THRESHOLD, frameToHsv, quantile, rgbToHsv, scanSummary, scorePair,
   suppressClose, SCAN_W,
 } from '../src/scan.js';
 
@@ -183,4 +183,11 @@ test('assessDegraded: 正常剪辑不标', () => {
   assert.equal(assessDegraded({ span: 30, cuts: 100, hotRatio: 0.1 }), null);  // 高分帧很少
   assert.equal(assessDegraded({ span: 0, cuts: 5, hotRatio: 0.9 }), null);
   assert.equal(assessDegraded({ span: 30, cuts: 0, hotRatio: 0.9 }), null);
+});
+
+test('quantile: 取低分位用于"这片就是很快"的阈值', () => {
+  const scores = [3, 26, 30, 36, 39, 39, 50, 52, 55, 57, 60, 61, 62, 63, 77, 78, 89];
+  assert.equal(quantile(scores, 0.10), 26);
+  assert.equal(quantile(scores, 0.50), 55);
+  assert.equal(quantile([], 0.1), 0);
 });
