@@ -16,7 +16,7 @@ import { DETAIL_CHARS, runStoryboard, formatManifest, formatProbe, formatRemoteP
 import { probeVideo } from './probe.js';
 import { isHttpUrl, probeUrl, resolveDirectUrl, resolveInput } from './fetch.js';
 import {
-  storyboardToolSpec, zoomToolSpec, probeToolSpec, validateToolArgs, validateZoomArgs,
+  storyboardToolSpec, zoomToolSpec, probeToolSpec, locateToolSpec, validateToolArgs, validateZoomArgs,
 } from './tool-spec.js';
 
 export const name = 'dsh-video-storyboard';
@@ -159,10 +159,43 @@ export async function apply(ctx) {
     },
   });
 
+  // 纯文本定位：不读帧、不出图，靠已有的转写回答"那句话在第几分钟"
+  const locate = defineTool({
+    ...locateToolSpec(),
+    async execute(args) {
+      if (!args?.input) throw new Error('input is required');
+      if (!args?.query) throw new Error('query is required');
+      const max = Math.min(20, Math.max(1, Number(args.max) || 5));
+      const resolved = await resolveInput(args.input, {
+        cookies: args.cookies, allowAnonymous: args.allowAnonymous === true,
+      });
+      let segments = recallSegments(resolved.path);
+      if (!segments) {
+        // 没有现成转写就补跑一次（只出文本、不出图）：复用 storyboard 的全套配置，
+        // 跑完它会自己把转写塞进 locate 的缓存里
+        await runStoryboard({
+          input: resolved.path, from: args.from, to: args.to, cells: 1,
+          transcriptFile: args.transcriptFile, textOnly: true, encode: false,
+        });
+        segments = recallSegments(resolved.path);
+      }
+      if (!segments || segments.length === 0) {
+        return { text: 'no transcript available for this file: run video_storyboard first, ' +
+          'or pass transcriptFile. Without a transcript there is nothing to match on.' };
+      }
+      const lo = Number.isFinite(args.from) ? args.from : 0;
+      const hi = Number.isFinite(args.to) ? args.to : Infinity;
+      const inWindow = segments.filter((x) => x.to >= lo && x.from <= hi);
+      const matches = matchSegments(inWindow, args.query, { max });
+      return { text: formatMatches(args.query, matches, { total: inWindow.length }) };
+    },
+  });
+
   const disposers = [
     ctx.tools.register(storyboard),
     ctx.tools.register(zoom),
     ctx.tools.register(probe),
+    ctx.tools.register(locate),
   ];
   return () => {
     for (const dispose of disposers.reverse()) dispose?.();

@@ -675,10 +675,13 @@ export function __clearDirectCache() {
 function pickVideoFormat(formats, height) {
   const video = formats.filter((f) => f.vcodec && f.vcodec !== 'none');
   if (video.length === 0) return null;
+  // **按短边比，不按 height**：竖屏视频的 height 是长边（1080x1920），用 height<=1080 会把
+  // 1080x1920 排除、退到 480x852 —— 清单写着 1080p，实际给的是 852（issue #9）。
+  const short = (f) => Math.min(f.height ?? 0, f.width ?? 0) || (f.height ?? 0);
   const below = video
-    .filter((f) => !f.height || f.height <= height)
-    .sort((a, b) => (b.height ?? 0) - (a.height ?? 0) || (b.tbr ?? 0) - (a.tbr ?? 0));
-  return below[0] ?? [...video].sort((a, b) => (a.height ?? 0) - (b.height ?? 0))[0];
+    .filter((f) => !f.height || short(f) <= height)
+    .sort((a, b) => short(b) - short(a) || (b.tbr ?? 0) - (a.tbr ?? 0));
+  return below[0] ?? [...video].sort((a, b) => short(a) - short(b))[0];
 }
 
 function directFromFormat(chosen) {

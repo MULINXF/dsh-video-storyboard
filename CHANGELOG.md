@@ -1,5 +1,33 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **`video_locate` — a phrase to a timestamp, with no frame decode.** It matches against the transcript
+  already produced by `video_storyboard` (or runs ASR once if there is none) and returns timestamped lines
+  best-first, ready to feed into `video_zoom`. Matching ignores punctuation, scores by longest common
+  substring, and prefers the shorter line on a tie ("记忆管理局" beats "记忆管理局的人来了"). Measured
+  **1 ms** on a 90 s clip. Note: needs speech — a music-only film has one empty segment and matches nothing.
+
+- **`<name>.evidence.json` next to every sheet.** Per cell: from/to, the frame timestamp, cut count, chars,
+  text. The manifest is prose for the model; this is for whoever has to verify it later without re-running.
+
+- **Manifest says the sheet is already in context** (one line, ~100 chars). Re-reading the same film used to
+  cost another 384 tokens per question; now the model is told to cite cells by number instead.
+  Net: +138 characters always, −384 per avoided re-read.
+
+### Fixed
+
+- **Vertical `video_zoom` picked the wrong track** (issue #9). `pickVideoFormat` filtered on `height`, which
+  on a 9:16 video is the *long* edge, so 1080x1920 was excluded and it fell back to 480x852 — while the
+  manifest claimed 1080p. It now compares the short edge.
+
+- **Tiled sub-frames bypassed the high-resolution direct link** (issue #9). `extractSubTile` read
+  `remote.url` / `remote.headers`, but the object carries `{uri, http:{userAgent, referer}}`, so every tile
+  silently fell back to the local 360p copy without counting a `frameFallback`. Now it uses the real fields,
+  falls back per tile on failure, and reports the fallback.
+
 ## [0.4.0] — 2026-10-28
 
 The release where fast cuts finally count. Three things were true before this version and are not any more:

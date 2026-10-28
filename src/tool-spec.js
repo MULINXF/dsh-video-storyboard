@@ -14,6 +14,7 @@
 export const TOOL_NAME = 'video_storyboard';
 export const ZOOM_TOOL_NAME = 'video_zoom';
 export const PROBE_TOOL_NAME = 'video_probe';
+export const LOCATE_TOOL_NAME = 'video_locate';
 
 export function storyboardToolSpec() {
   return {
@@ -375,4 +376,63 @@ export function validateZoomArgs(args) {
     problems.push('sourceHash must be a boolean');
   }
   return problems;
+}
+
+/**
+ * video_locate — 纯文本的"那句话在第几分钟"。
+ *
+ * 刻意不读帧、不出图：定位靠的是转写文本，本来就在手里。
+ * 模型拿到时间窗之后自己去 video_zoom，省掉一次整段的重新取帧。
+ */
+export function locateToolSpec() {
+  return {
+    name: LOCATE_TOOL_NAME,
+    description: [
+      'Find where a phrase is spoken in a video: returns timestamped transcript lines that match,',
+      'best first. Text only - no frame decode, no image, no tokens spent on pixels.',
+      '',
+      'Use this when you know roughly what was said but not when ("where does it mention X").',
+      'Then pass the returned from/to window to video_zoom to see that moment.',
+      '',
+      'Needs a transcript. If video_storyboard already ran on this file in this session, its',
+      'transcript is reused; otherwise ASR runs for the requested window (slow if the window is long).',
+    ].join('\n'),
+    parameters: {
+      input: {
+        type: 'string',
+        required: true,
+        description: 'Local absolute path or http(s) link. Must be the same string used for ' +
+          'video_storyboard if you want its transcript reused.',
+      },
+      query: {
+        type: 'string',
+        required: true,
+        description: 'The phrase to look for. Chinese and English both work; punctuation and spacing ' +
+          'are ignored. Long quotes match better than single characters.',
+      },
+      from: { type: 'number', description: 'Only search after this second. Default: start of file.' },
+      to: { type: 'number', description: 'Only search before this second. Default: end of file.' },
+      max: { type: 'number', description: 'How many matches to return, 1-20. Default 5.' },
+      transcriptFile: {
+        type: 'string',
+        description: 'Path to an existing SRT/JSON transcript. Skips ASR entirely.',
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          text: { type: 'string', required: true, description: 'Timestamped matching lines, best first.' },
+        },
+      },
+      render(args, value) {
+        return [{ type: 'text', text: value.text }];
+      },
+    },
+    timeoutMs: 120_000,
+    isConcurrencySafe() {
+      return true;
+    },
+  };
 }

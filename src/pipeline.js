@@ -5,10 +5,13 @@
  * 本模块只返回内存里的 PNG buffer 与结构化清单，落盘由调用方决定。
  */
 
+import { writeFile } from 'node:fs/promises';
+
 import { probeVideo, DEFAULT_FFMPEG, DEFAULT_FFPROBE } from './probe.js';
 import { resolveInput } from './fetch.js';
 import { loadTranscriptFile } from './transcript-file.js';
 import { decideCuts, scanShots, suppressClose } from './scan.js';
+import { rememberSegments } from './locate.js';
 import { fitSegments, segmentsFromCuts, totalDur } from './segments.js';
 import { bestLayout, groupByCount, suggest, PLAN_THRESHOLDS } from './plan.js';
 import { findBursts, planCellRanges } from './density.js';
@@ -322,6 +325,8 @@ export async function runStoryboard(opts) {
 
   // 两条路：自适应按密度分配格位（快切区多给格），否则退回"并段到 k 格"
   const relCuts = cuts.map((c) => c.t - winStart);
+  // 让 video_locate 能直接复用这次的转写，省掉一次 ASR
+  if (transcriptInfo?.segments?.length) rememberSegments(input, transcriptInfo.segments);
   let cellRanges;
   if (adaptive && relCuts.length > 0) {
     cellRanges = planCellRanges({
@@ -638,19 +643,72 @@ async function extractSubTile({ input, remote, a, b, k, cellW, cellH, ffmpegPath
   const tileH = Math.floor(cellH / k);
   const n = k * k;
   const tiles = [];
+  let fellBack = 0;
   for (let i = 0; i < n; i++) {
     const at = a + (b - a) * ((i + 0.5) / n);
-    const t = await extractFrameRaw({
-      input: remote?.url ?? input, at, dur: 0, cellW: tileW, cellH: tileH,
-      ffmpegPath, http: remote ? { headers: remote.headers } : undefined, mode: 'mid',
-    });
-    tiles.push(t.buffer);
+    // `remoteFrame` 的字段是 {uri, http:{userAgent, referer}} —— 之前这里读的是 url/headers，
+    // 两个都不存在，于是子帧静默退回本地低清副本、HTTP 头也丢了（issue #9）。
+    let tile = null;
+    if (remote?.uri) {
+      try {
+        tile = await extractFrameRaw({
+          input: remote.uri, at, dur: 0, cellW: tileW, cellH: tileH, ffmpegPath, http: remote.http, mode: 'mid',
+        });
+      } catch {
+        tile = null;      // 远程失败就回落本地，并记一笔，清单里会报 frameFallbacks
+      }
+    }
+    if (!tile) {
+      tile = await extractFrameRaw({
+        input, at, dur: 0, cellW: tileW, cellH: tileH, ffmpegPath, mode: 'mid',
+      });
+      if (remote?.uri) fellBack += 1;
+    }
+    tiles.push(tile.buffer);
   }
-  return { buffer: tileSubFrames(tiles, k, cellW, cellH), t: a + (b - a) / 2 };
+  return {
+    buffer: tileSubFrames(tiles, k, cellW, cellH),
+    t: a + (b - a) / 2,
+    via: fellBack > 0 ? 'local-fallback' : 'ok',
+  };
+}
+
+/**
+ * 每格的机器可读记录：时间、帧时刻、刀数、字数、原文。
+ *
+ * 清单是给模型读的散文，这份是**给人和脚本复核用的**：想知道"第 5 格真的是 3:29 吗"，
+ * 不用重跑，对着时间码回看原片就行。
+ */
+export function buildEvidence(result) {
+  const cells = [];
+  for (const sheet of result.sheets ?? []) {
+    for (const c of sheet.cells ?? []) {
+      cells.push({
+        cell: c.i,
+        sheet: c.sheet,
+        from: c.t_start,
+        to: c.t_end,
+        frame_at: c.t_frame ?? null,
+        cuts: c.cuts ?? 0,
+        sub: c.sub ?? null,
+        chars: (c.text ?? '').length,
+        text: c.text ?? '',
+      });
+    }
+  }
+  return {
+    version: 1,
+    input: result.source?.url ?? result.info?.path ?? null,
+    duration: result.info?.duration ?? null,
+    size: result.info ? `${result.info.width}x${result.info.height}` : null,
+    cells_total: cells.length,
+    cuts_total: result.cuts?.length ?? 0,
+    cells,
+  };
 }
 
 /** 把结果编码成 PNG 落盘（CLI 用；插件走附件服务，不落盘） */
-export async function saveStoryboards(result, outPath, { ffmpegPath = DEFAULT_FFMPEG, quality } = {}) {
+export async function saveStoryboards(result, outPath, { ffmpegPath = DEFAULT_FFMPEG, quality, evidence = true } = {}) {
   const paths = [];
   for (const s of result.sheets) {
     // 多张图时要保证文件名唯一：原来只认 `.png` 后缀，
@@ -660,6 +718,12 @@ export async function saveStoryboards(result, outPath, { ffmpegPath = DEFAULT_FF
       : withSheetSuffix(outPath, s.sheet);
     await encodeRaw(s.buffer, s.width, s.height, path, { ffmpegPath, quality });
     paths.push(path);
+  }
+  if (evidence) {
+    // 证据文件跟图放一起：图给人/模型看，json 给脚本和复核用
+    const sidecar = `${outPath.replace(/\.[^./\\]+$/, '')}.evidence.json`;
+    await writeFile(sidecar, `${JSON.stringify(buildEvidence(result), null, 2)}\n`, 'utf8');
+    result.evidencePath = sidecar;
   }
   return paths;
 }
@@ -1042,5 +1106,9 @@ export function formatManifest(result, {
   lines.push(`total ${picked.length} of ${total} cells shown` +
     (hasSheets ? '; unlabeled cells are padding, not content.' : '.'));
   lines.push('</storyboard>');
+  // 追问时不必重新出图 —— 这张图就在上下文里，按格号引用即可（每省一次就是 384 token）。
+  // 两行共约 100 字符，换掉一次重读的 384 token —— 只要追问一次就赚回来。
+  lines.push('sheet already in context: cite cells by number; video_zoom only for a narrower window.');
+  lines.push('per-cell times for verification: <name>.evidence.json');
   return lines.join('\n');
 }
