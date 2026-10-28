@@ -244,8 +244,13 @@ export function scanShots(opts) {
       // 再用目标个数做上限，保证"同分整簇"不会把节奏带偏。
       const eps = 1e-6;
       const above = stats.filter((s) => s.score > used + eps);
-      const cap = autoThreshold(scores, { duration: end !== undefined ? end - start : frame / fps }).target;
-      const picked = cap > 0 && above.length > cap
+      // 上限只对 auto 生效。显式传 threshold 是调用方的明确意图（"这片就是很快"），
+      // 拿 auto 的目标数去砍它，等于把 6 镜头/秒的素材削到 1.3 镜头/秒。
+      // （实测：3 秒 18 镜头的合成素材，threshold=5 时被削成 4 刀。）
+      const cap = threshold === 'auto'
+        ? autoThreshold(scores, { duration: end !== undefined ? end - start : frame / fps }).target
+        : Infinity;
+      const picked = Number.isFinite(cap) && cap > 0 && above.length > cap
         ? [...above].sort((a, b) => b.score - a.score).slice(0, cap).sort((a, b) => a.t - b.t)
         : above;
       const raw = picked.map((s) => ({ ...s }));

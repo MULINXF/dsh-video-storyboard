@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- The target-count cap added in 0.2.2 was applied even when the caller passed an explicit `threshold`.
+  The cap exists to stop tied frames from dragging in a cluster; applying it to an explicit threshold
+  overrode the caller's decision, so fast material could not be counted at all. Measured on a synthetic
+  3 s / 18-shot clip: `threshold: 5` returned 4 cuts instead of 16.
+
+### Added
+
+- `video_storyboard({ scanGap })` — the minimum spacing between detected cuts, default 0.35 s. It is a
+  different knob from `minGap` (which merges cells). Fast material needs it: the same 3 s / 18-shot clip
+  yields **3 cuts at the default** and **16 cuts at `scanGap: 0.12`**. Until this, the scanner had no way
+  to observe anything under ~0.35 s per shot, which is exactly the range montage lives in.
+
 ## [0.3.2] — 2026-10-28
 
 ### Fixed

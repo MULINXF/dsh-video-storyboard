@@ -81,6 +81,9 @@ export async function runStoryboard(opts) {
     to,
     threshold = 'auto',
     minGap = 1.2,
+    // 扫描时的"两刀最短间隔"。和上面的 minGap（格子合并）不是一回事：
+    // 快闪素材要把这个调小才数得出镜头数，否则 3 秒 18 镜会被压成 4 刀。
+    scanGap = 0.35,
     adaptive = true,
     pick = 'sharp',
     burn = 'index',
@@ -143,7 +146,9 @@ export async function runStoryboard(opts) {
     }
     : await withCache(key, () => scanShots({
       input, fps: info.fps, threshold, start: winStart, end: winStart + winDur,
-      ffmpegPath, onProgress,
+      // 默认 0.35s：两刀之间短于它的合并成一刀。快闪素材（<0.35s 一个镜头）要显式调小，
+      // 否则 3 秒 18 个镜头会被压成 4 刀 —— 实测过，这是"数不出快闪"的主因。
+      minGap: scanGap, ffmpegPath, onProgress,
     }), { enabled: cache });
   if (cache && !scan.cached && !precomputed) await pruneCache();
 
