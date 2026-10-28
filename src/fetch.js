@@ -353,6 +353,7 @@ export function formatSelector(height, { withAudio = true } = {}) {
   // **末尾必须留一个不带筛选的兜底**。竖屏视频在 yt-dlp 里是 360x640 / 480x852 ——
   // `height` 是长边，`height<=480` 一个都匹配不到，整条链路直接报
   // "Requested format is not available"（实测 BV1BjxM69EHh 就是这样挂的）。
+  if (!cap) return withAudio ? 'bv*+ba/b' : 'bv*/b';
   if (!withAudio) return `bv*${cap}/b${cap}/bv*/b`;
   return `bv*${cap}+ba/b${cap}/bv*+ba/b`;
 }
