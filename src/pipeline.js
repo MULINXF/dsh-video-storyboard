@@ -400,8 +400,12 @@ export async function runStoryboard(opts) {
     for (const [gi, { from: a, to: b }] of group.entries()) {
       index += 1;
       // 这一格里切了几刀 —— 快闪蒙太奇的"速度"就是这个数字，模型不用自己数刻度
-      const cellCuts = cuts.filter((c) => c.t >= a && c.t < b).length;
-      let sub = chooseSubGrid({ shots: cellCuts + 1, cellW, cellH, dur: b - a });
+      const cellCutList = cuts.filter((c) => c.t >= a && c.t < b);
+      const cellCuts = cellCutList.length;
+      const cutScore = cellCuts > 0
+        ? cellCutList.reduce((n, c) => n + (c.score ?? 0), 0) / cellCuts
+        : Infinity;
+      let sub = chooseSubGrid({ shots: cellCuts + 1, cellW, cellH, dur: b - a, cutScore });
       while (sub > 1 && sub * sub - 1 > subBudget) sub -= 1;   // 预算不够就降档，降不下去就整格
       if (sub > 1) subBudget -= sub * sub - 1;
       let frame;
@@ -524,8 +528,13 @@ export async function runStoryboard(opts) {
  *  - 子帧不能小于 100×56：再小就只剩色块（实测 110×61 是"能分辨不同镜头"的下限）。
  */
 export function chooseSubGrid({
-  shots, cellW, cellH, dur, minShots = 4, minRate = 0.7, minSubW = 100, minSubH = 56,
+  shots, cellW, cellH, dur, cutScore = Infinity,
+  minShots = 4, minRate = 0.7, minSubScore = 30, minSubW = 100, minSubH = 56,
 }) {
+  // 那些"刀"本身要有分量。2D 线稿动画、游戏 UI 这类内容每帧都在变一点，
+  // 刀数能到 0.7/s，但摊出来的 9 张几乎一模一样（实测 RETAS 演示片就是这样）——
+  // 摊开只有在"刀是硬切"时才有意义。
+  if (cutScore < minSubScore) return 1;
   if (!(shots >= minShots)) return 1;
   // **密度才是判据，不是镜头数**：15 秒里 5 个镜头是正常的叙事节奏，
   // 把这种格子摊成 9 张只会毁掉"这段整体长什么样"。只有平均镜头短于 ~1.4 秒（≥0.7 刀/秒）

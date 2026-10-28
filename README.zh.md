@@ -1,4 +1,6 @@
-# dsh-video-storyboard · 中文说明
+# dsh-video-storyboard · 中文长版说明
+
+> **速览版在 [README.md](README.md)**（三分钟读完）。这份是长版：设计取舍、实测基线、和其他插件的对比。
 
 [![test](https://github.com/SAOS-3624/dsh-video-storyboard/actions/workflows/test.yml/badge.svg)](https://github.com/SAOS-3624/dsh-video-storyboard/actions/workflows/test.yml)
 

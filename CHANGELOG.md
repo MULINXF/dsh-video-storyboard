@@ -25,6 +25,13 @@
   overrode the caller's decision, so fast material could not be counted at all. Measured on a synthetic
   3 s / 18-shot clip: `threshold: 5` returned 4 cuts instead of 16.
 
+### Changed
+
+- Sub-dividing a cell now also requires the cuts inside it to be *strong* (mean score ≥ 30), not just
+  frequent. A 2D line-art animation hits 0.7 shots/s with cuts that are almost invisible frame to frame,
+  so tiling produced nine nearly identical sub-frames — measured on a RETAS demo and on a mobile-game ad.
+  Real montages are unaffected (concept PV still tiles 4×4, the 108-anime mashup tiles four cells).
+
 ### Added
 
 - **Fast cells are tiled into k×k sub-frames.** A cell covering a montage used to show one representative
