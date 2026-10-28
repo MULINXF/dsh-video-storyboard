@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- URL input now accepts yt-dlp's DASH output names such as `video.f100022.mp4`. The downloader
+  previously required the exact name `video.mp4` and failed with
+  `unexpected container: ... (expected mp4)` even though the file was a valid video. The file
+  is now renamed to the stable `video.mp4` before probing, so the cache and pipeline keep one
+  path contract.
+
+### Security
+
+- Transcript text is treated as untrusted data. Segments that look like instructions addressed
+  to the agent (for example "ignore previous instructions" or "stop the run / do not call tools")
+  are reported in `manifest.transcript.suspectInjection` with source, timestamp and a bounded
+  quote. The run continues; the manifest line explicitly says this is data, not a command.
+  This is evidence, not a content filter: false negatives are preferable to flagging ordinary
+  dialogue.
+
 ## [0.3.1] — 2026-10-28
 
 ### Host ffmpeg discovery
