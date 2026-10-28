@@ -204,6 +204,30 @@ export function tileSubFrames(tiles, k, cellW, cellH) {
   return out;
 }
 
+/**
+ * 在"堆叠格"的右下角画一个标记：三条横杠。
+ *
+ * 为什么要有：堆叠后的画面是**干净得不真实**的 —— 原本满屏闪的东西没了。
+ * 不给标记，模型会以为视频本来就长这样，然后去描述一个不存在的画面。
+ * 三条杠 = "这张是多帧叠出来的"，配合清单里那一行解释。
+ */
+export function markStackedCell(buffer, cellW, cellH) {
+  const h = Math.max(8, Math.round(cellH * 0.09));
+  const barW = Math.round(h * 1.5);
+  const gap = Math.max(1, Math.round(h * 0.18));
+  const pad = Math.max(2, Math.round(h * 0.28));
+  const boxW = barW + pad * 2;
+  const boxH = h + pad * 2;
+  const x = cellW - boxW - Math.max(2, Math.round(cellW * 0.012));
+  const y = cellH - boxH - Math.max(2, Math.round(cellH * 0.02));
+
+  fillRect(buffer, cellW, cellH, x, y, boxW, boxH, BADGE_BG, 0.72);
+  const barH = Math.max(1, Math.round(h / 4));
+  for (let i = 0; i < 3; i++) {
+    fillRect(buffer, cellW, cellH, x + pad, y + pad + i * (barH + gap), barW, barH, BADGE_FG, 1);
+  }
+}
+
 /** 把一格 rawvideo（尺寸必须等于 cellW×cellH）贴到画布上 */
 export function blit(dst, dstW, dstH, x, y, cellW, cellH, src) {
   const need = cellW * cellH * 3;

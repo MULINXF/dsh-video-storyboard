@@ -27,7 +27,7 @@
  *        minFlips:  来回跨越几次算"在闪"
  * @returns {{median:Buffer, coreRatio:number, flickerRatio:number, pixels:number}}
  */
-export function analyseStack(frames, { tolerance = 18, minFlips = 2, farSpread = 14 } = {}) {
+export function analyseStack(frames, { tolerance = 18, minFlips = 3 } = {}) {
   if (!Array.isArray(frames) || frames.length < 3) {
     throw new RangeError('analyseStack needs at least 3 frames');
   }
@@ -71,28 +71,7 @@ export function analyseStack(frames, { tolerance = 18, minFlips = 2, farSpread =
       prevFar = far;
     }
     if (near) core += 1;
-    if (flips >= minFlips) {
-      // 光看"翻了几次"不够：一个在放大的物体，边缘像素也会反复进出容差。
-      // 区别在于**每次离得远的那个值是否一致** —— 闪动的文字每次"亮"起来都是同一个样子，
-      // 而物体边缘每次被覆盖的比例不同，值会在中间来回滑。
-      const farVals = [];
-      for (let c = 0; c < n; c++) {
-        const f = frames[c];
-        const d = Math.max(
-          Math.abs(f[base] - median[base]),
-          Math.abs(f[base + 1] - median[base + 1]),
-          Math.abs(f[base + 2] - median[base + 2]),
-        );
-        if (d >= tolerance) farVals.push(f[base + 2]);   // 用亮度通道代表"那一帧它长什么样"
-      }
-      let consistent = true;
-      if (farVals.length >= 2) {
-        const m = farVals.reduce((a, b) => a + b, 0) / farVals.length;
-        const sd = Math.sqrt(farVals.reduce((a, b) => a + (b - m) ** 2, 0) / farVals.length);
-        consistent = sd < farSpread;
-      }
-      if (consistent) flicker += 1;
-    }
+    if (flips >= minFlips) flicker += 1;
   }
 
   return {
@@ -106,15 +85,19 @@ export function analyseStack(frames, { tolerance = 18, minFlips = 2, farSpread =
 /**
  * 判定：这一段是"闪烁蒙版"而不是"快速剪辑"。
  *
- * 三个条件都必要：
- *  - coreRatio 高：有一块不动过的底（剪辑没有）
- *  - flickerRatio 在合理区间：太少说明只是噪点，太多说明整幅都在变（那是转场）
- *  - core + flicker 不能把画面占满：留一部分给"既不是底也不在闪"的区域（运动物体），
- *    但整体偏离面积不能过半，否则说明底图本身在动
+ * **判据是 flickerRatio（反复翻转的像素比例），不是 coreRatio。** 这是在真素材上量出来的：
+ *
+ *   窗口              core(全帧)  core(≥50%帧)  flick(翻转≥3)
+ *   3:29-3:30 闪烁段     0.003      0.620        0.739
+ *   真快切 46s           0.358      0.923        0.242
+ *   真快切 10s           0.000      0.225        0.070
+ *
+ * core 在真快切上反而更高 —— 因为一个镜头如果占住窗口一半以上的帧，中位数就等于它，
+ * 它那几帧全都"贴着中位数"。所以 core 不能用来区分。
+ *
+ * 能区分的是**时间形态**：真剪辑是一次性从 A 换成 B（每个像素只翻一次），
+ * 故障闪烁是像素在底图和噪点之间来回跳（翻很多次）。
  */
-export function isFlicker({ coreRatio, flickerRatio }, {
-  minCore = 0.5, minFlicker = 0.05, maxFlicker = 0.6,
-} = {}) {
-  if (!Number.isFinite(coreRatio) || !Number.isFinite(flickerRatio)) return false;
-  return coreRatio >= minCore && flickerRatio >= minFlicker && flickerRatio <= maxFlicker;
+export function isFlicker({ flickerRatio }, { minFlicker = 0.5 } = {}) {
+  return Number.isFinite(flickerRatio) && flickerRatio >= minFlicker;
 }

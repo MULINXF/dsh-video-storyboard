@@ -19,7 +19,8 @@ test('analyseStack: 少数帧闪烁 + 稳定底 → core 高、flicker 有值、
   assert.equal(st.coreRatio, 0.8, '没有闪的 80 个像素一直在底上');
   assert.ok(st.flickerRatio >= 0.15, `闪的像素要被算出来，实得 ${st.flickerRatio}`);
   assert.equal(st.median[0], 50, '中位数应该回到底色，闪烁被抹掉');
-  assert.equal(isFlicker(st), true);
+  // 20% 的像素在闪，但阈值定在 0.5（那是真素材上量出来的分界）——20% 不判闪烁
+  assert.equal(isFlicker(st), false);
 });
 
 test('analyseStack: 闪烁占一半帧时，逐像素中位数落在中间 —— 已知局限', () => {
@@ -49,4 +50,10 @@ test('analyseStack: 静止画面 → core 接近 1、flicker 为 0，不判闪�
   assert.equal(st.coreRatio, 1);
   assert.equal(st.flickerRatio, 0);
   assert.equal(isFlicker(st), false);
+});
+
+test('isFlicker: 阈值看的是"翻转像素占比"，不是 core', () => {
+  assert.equal(isFlicker({ coreRatio: 0.95, flickerRatio: 0.2 }), false, '大片静止 + 少数在闪 = 不当闪烁');
+  assert.equal(isFlicker({ coreRatio: 0.1, flickerRatio: 0.74 }), true, '整幅在噪点里来回跳 = 闪烁');
+  assert.equal(isFlicker({ flickerRatio: 0.24 }), false, '真快切落在 0.24，不该被吞');
 });
