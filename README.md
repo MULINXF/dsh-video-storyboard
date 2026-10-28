@@ -27,16 +27,21 @@
 
 ## 安装
 
+**从零开始的完整步骤（含依赖、自检、排错）见 [docs/INSTALL.zh.md](docs/INSTALL.zh.md)。**
+
+三句话版本：
+
 ```bash
-# 1. 装进 DSH 插件目录
-node scripts/install-dev.mjs
-
-# 2. 依赖：ffmpeg / ffprobe（必须），yt-dlp（只有贴 B 站/YouTube 链接时才要）
-#    Windows: winget install ffmpeg
-#    yt-dlp:  pip install --user -U yt-dlp
-
-# 3. 重启 DSH
+winget install Gyan.FFmpeg          # 必须：ffmpeg + ffprobe
+pip install --user -U yt-dlp        # 只有贴 B 站/YouTube 链接才需要
+node scripts/install-dev.mjs        # 装插件，然后重启 DSH
 ```
+
+| 依赖 | 必须吗 | 不装会怎样 |
+|---|---|---|
+| ffmpeg + ffprobe | **必须** | 第一步就报错 |
+| yt-dlp | 可选 | 本地文件照常能用，贴链接不行 |
+| ASR 服务 | 可选 | 能出图，但清单里没有台词 |
 
 插件**不打包** ffmpeg 和 yt-dlp，只调用你自己装的那份。找不到时会给出安装指引，不会静默失败。
 
@@ -133,6 +138,17 @@ cell 3 (r1c3) = 00:33.29-00:47.08  cuts 10  16 frames (4×4)
 - 极暗素材的取帧锐度判断不稳。
 - 分格摊开后子帧最小约 100×56，再小就只剩色块。
 
+## 文档
+
+| 文档 | 内容 |
+|---|---|
+| [docs/INSTALL.zh.md](docs/INSTALL.zh.md) | 从零安装：依赖、自检、排错表 |
+| [docs/USAGE.zh.md](docs/USAGE.zh.md) | 完整手册：三条安装路径、六个工作流、每个参数 |
+| [docs/HISTORY.zh.md](docs/HISTORY.zh.md) | 从 v0.1 到现在，按"被什么打脸"组织 |
+| [CHANGELOG.md](CHANGELOG.md) | 逐版本变更 |
+| [CREDITS.md](CREDITS.md) | 第三方致谢、社区贡献、测试素材作者 |
+| [README.en.md](README.en.md) | English |
+
 ## 许可
 
-见 [LICENSE](LICENSE)。第三方致谢见 [CREDITS.md](CREDITS.md)。
+见 [LICENSE](LICENSE)。

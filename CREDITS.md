@@ -58,6 +58,36 @@
 
 > 这份表只记"提出并推动了什么"，不区分代码是否被逐行采用——诊断、复现和反例同样计入。
 
+## 4.5 测试素材的作者
+
+跨类型调参用了十支公开视频，全部是 B 站创作者的公开作品。**只用来看、没有分发**，但素材就是他们的劳动成果，
+该写名字：
+
+| 用途 | 创作者 | 视频 |
+|---|---|---|
+| PPT 录屏 | 诺贝尔可爱讲 | [BV1y7411p7Ho](https://www.bilibili.com/video/BV1y7411p7Ho) |
+| 监控合集 | 人类爆笑行为图鉴 | [BV1zAx36cEdU](https://www.bilibili.com/video/BV1zAx36cEdU) |
+| 二维动画 | 大锐吉吉吉 | [BV1W5no6QEe2](https://www.bilibili.com/video/BV1W5no6QEe2) |
+| 三维动画 | 搬运的贝塔（Blender《春》） | [BV1Yb411g7VV](https://www.bilibili.com/video/BV1Yb411g7VV) |
+| 演播室口播 | 视听科技新视角 | [BV1R44y1G7eZ](https://www.bilibili.com/video/BV1R44y1G7eZ) |
+| 手持 vlog | 风光喵 | [BV11L4y1a7QB](https://www.bilibili.com/video/BV11L4y1a7QB) |
+| 竖屏短视频 | ding-hiro | [BV1BjxM69EHh](https://www.bilibili.com/video/BV1BjxM69EHh) |
+| 游戏录屏 | 你搜搜导航Dios | [BV1SmqpBuEzG](https://www.bilibili.com/video/BV1SmqpBuEzG) |
+| 动画混剪 | 崩铁代肝原神代肝糖糖 | [BV1nV411a7jr](https://www.bilibili.com/video/BV1nV411a7jr) |
+| 41 分钟纪录片 | 不会飞章鱼 | [BV1yJ411m7GP](https://www.bilibili.com/video/BV1yJ411m7GP) |
+
+> 这些名字不是背书，只是"我们拿谁的作品验证过自己"。如果某位作者不希望被列在这里，说一声就删。
+
+## 4.6 使用者
+
+这个项目的大部分改动不是想出来的，是**被用出来**的：
+
+- 提 issue 说"这里不对"的人 —— 你们比任何基准测试都有用。
+- 拿自己的片子试、然后说"这段还是糊"的人 —— 那通常意味着一整类内容没被覆盖。
+- 把插件装到奇奇怪怪的环境里（无 ffmpeg、只有音频流、竖屏、超长片）然后报错的人 —— 这些边界我们自己也想不到。
+
+**特别感谢每一位愿意把"不行"说出来的人。** 一个只说"挺好"的反馈，什么都改不动。
+
 ## 5. 如果将来真的要复制代码
 
 复制 MIT / BSD 代码是完全合法的，但要**随分发附带原版权声明与许可全文**。做法：

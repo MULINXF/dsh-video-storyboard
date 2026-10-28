@@ -1,6 +1,19 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.0] — 2026-10-28
+
+The release where fast cuts finally count. Three things were true before this version and are not any more:
+
+1. **A shot shorter than 0.35 s could not be seen at all** — the scanner merged it away. Montage lives
+   entirely below that line, so every count on a fast-cut film was a floor, not a count.
+2. **A cell covering a montage showed exactly one frame.** The number "22 shots" was in the text and
+   nowhere in the picture.
+3. **Vertical video could not be downloaded.** Every portrait URL from Bilibili died on the format selector.
+
+Measured across ten content types (slide recording, surveillance, 2D animation, 3D short, studio news,
+handheld vlog, mobile-game ad, anime mashup, concept PV, 51-minute documentary), the per-second cut count
+went from a suspiciously uniform 0.22–0.27 to the range the content actually has: 0.08 for a slide deck,
+1.18 for a mashup.
 
 ### Fixed
 
