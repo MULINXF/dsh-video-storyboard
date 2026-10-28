@@ -1,5 +1,39 @@
 # Changelog
 
+## [Unreleased]
+
+### Host ffmpeg discovery
+
+`ffmpeg` / `ffprobe` are now resolved in this order: explicit `DSH_FFMPEG_PATH` /
+`DSH_FFPROBE_PATH` (or `FFMPEG_PATH` / `FFPROBE_PATH`), then `$DSH_HOME/tools/ffmpeg/bin`,
+`$DSH_HOME/bin`, the install-root `tools/ffmpeg/bin`, and finally `PATH`. A DSH install can
+therefore carry its own ffmpeg without every plugin re-implementing the lookup. Missing binaries
+still fail with a message that lists every path that was tried.
+
+### Manifest provenance
+
+The text manifest now records what produced the image, not just the timing:
+
+- `cell="WxH"` — the actual cell size, so a reader can tell whether subtitles were legible.
+- `tokens="N (DSH estimate)"` — explicitly an estimate; the host owns the real token count.
+- `ffmpeg="..."` — the ffmpeg build that decoded the frames.
+- `sha256="..."` — optional source hash, only with `sourceHash: true` / `--source-hash`; it reads
+  the whole file, so it is off by default. For a URL input it hashes the downloaded scan copy,
+  not the remote stream; the `source:` line still identifies the URL.
+- one `plan:` line with the measured inputs (`duration`, `scanThreshold`, `meanLufs`,
+  `speechRate`, `motion`, `cuts`, `hasSubtitle`) and the effective thresholds from
+  `PLAN_THRESHOLDS`. This is diagnostic output, not a new set of knobs.
+
+The JSON manifest (CLI `--manifest`) carries the same `provenance` and full `plan` object.
+
+### Fixes
+
+- Window-scoped transcript stats now count only the segments inside the window. A whole-film
+  `transcriptFile` previously divided the full character count by the window duration, which made
+  `charsPerSec` and the auto-plan's speech-rate classification wrong for every clipped window.
+- `video_zoom` now forwards `transcript` (and `sourceHash`) instead of silently falling back to
+  the pipeline defaults.
+
 ## [0.3.0] — 2026-10-28
 
 **A URL is now a valid input.** Paste a Bilibili link (or anything yt-dlp supports) instead of a local

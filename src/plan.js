@@ -16,6 +16,13 @@ export const MIN_CELL_H = 135;
 export const MAX_SHEETS = 4;
 export const DEFAULT_ASPECT = 16 / 9;
 
+/** Content-classification thresholds. Kept in one place so the manifest can report them. */
+export const PLAN_THRESHOLDS = Object.freeze({
+  musicLufs: -18,
+  musicSpeechRate: 1,
+  speechRateCut: 3,
+});
+
 /** 画布比例 = (cols / rows) × 源比例。方形宫格才会还原源比例。 */
 export const canvasAspect = (cols, rows, aspect) => (cols / rows) * aspect;
 
@@ -89,13 +96,16 @@ export function suggest(meta) {
     : (avgShot < 4 ? 15 : 40);
   // 内容类型分流（实测基准）：口播片最轻最吵（5.6 字/秒 @ −23 LUFS），音乐片最响最静
   // （0.3 字/秒 @ −14.2 LUFS）。响度与字/秒是反向的，两个一起看比任何主观判断都准。
-  const musicDriven = Number.isFinite(meanLufs) && meanLufs > -18 && speechRate < 1;
+  const musicDriven = Number.isFinite(meanLufs)
+    && meanLufs > PLAN_THRESHOLDS.musicLufs
+    && speechRate < PLAN_THRESHOLDS.musicSpeechRate;
 
   let cells = Math.round(duration / perCell);
   cells = Math.min(cells, shots);            // 格数不该超过镜头数
   if (musicDriven) cells = Math.max(cells, 9);  // 音乐片的信息在画面上，别把格数压太低
   cells = snapCells(clamp(cells, 4, 16));
-  if (!musicDriven && (hasSubtitle || speechRate > 0) && speechRate > 3) {
+  if (!musicDriven && (hasSubtitle || speechRate > 0)
+    && speechRate > PLAN_THRESHOLDS.speechRateCut) {
     cells = snapCells(clamp(Math.round(cells * 0.6), 4, 12));   // 台词承担信息，图只做锚点
   }
 

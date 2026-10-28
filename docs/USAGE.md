@@ -22,7 +22,9 @@ One image is 384 tokens and holds 9–16 frames.
 | ffmpeg + ffprobe | `ffmpeg -version` | the only external dependency, not bundled |
 | DSH (desktop or a normal profile) | — | the plugin runs in its tool layer |
 
-If ffmpeg is not on `PATH`:
+If ffmpeg is not on `PATH`, the plugin also checks `$DSH_HOME/tools/ffmpeg/bin`,
+`$DSH_HOME/bin`, then `<install-root>/tools/ffmpeg/bin` (the order used by DSH itself).
+An explicit override always wins:
 
 ```bash
 DSH_FFMPEG_PATH=D:/ffmpeg/bin/ffmpeg.exe
@@ -126,11 +128,13 @@ Returns duration / resolution / fps / rotation / audio / subtitles **and two rea
 | `input` | required | — |
 | `from` / `to` | whole file | read a long film in windows; also the way to avoid spoilers |
 | `cells` | auto | 1–16. More detail → 12/16; more clarity → 4/6 |
-| `sheets` | auto | 1–4. Each image is 384 tokens |
+| `sheets` | auto | 1–4. Each image is ~384 tokens in DSH (host-dependent) |
 | `pick` | `sharp` | change only if you want segment-mid or histogram-representative |
 | `burn` | `index` | `none` turns the burned cell number off. Timecodes are never burned in — they live in the text at 0.01 s |
 | `minGap` | 1.2 | drop to 0.4 so half-second shots get their own cell |
 | `transcript` | `auto` | `off` for pure visual analysis |
+| `transcriptFile` | — | SRT / JSON `[{start,end,text}]` / Bilibili subtitle JSON; skips subtitle extraction and ASR |
+| `sourceHash` | `false` | also write the source SHA-256 into the manifest (reads the whole file) |
 | `detail` | `med` | `low` 60 / `med` 120 / `high` 400 chars, cut on sentence boundaries |
 | `cellRange` | — | `[14, 42]` renders only that slice of the index |
 | `textOnly` | `false` | text only, no image (paging: ~0.8 s/page) |
@@ -142,6 +146,7 @@ Returns duration / resolution / fps / rotation / audio / subtitles **and two rea
 | `input` / `from` / `to` | required | shorter window → larger cells |
 | `cells` | 6 | 1–9; 3–4 for subtitles and faces |
 | `minGap` | 1.2 | 0.3–0.4 to stop short shots being merged |
+| `sourceHash` | `false` | also write the source SHA-256 into the manifest |
 
 ---
 

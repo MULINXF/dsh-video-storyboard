@@ -24,7 +24,7 @@ const opt = parse(process.argv.slice(2), {
   out: 'storyboard.png', manifest: null, plan: 0, 'text-only': false, 'cell-range': null,
   batch: 0, detail: 'med',
   cookies: null, 'allow-anonymous': false, 'scan-height': 360, 'zoom-height': 1080,
-  'transcript-file': null,
+  'transcript-file': null, 'source-hash': false,
 });
 const input = opt._[0];
 if (!input) {
@@ -133,6 +133,7 @@ const r = await runStoryboard({
   input,
   fetchOptions,
   transcriptFile: opt['transcript-file'] ?? undefined,
+  sourceHash: opt['source-hash'] === true,
   from: Number(opt.from) || 0,
   to: Number(opt.to) || 0,
   cells: Number(opt.cells) || 0,
@@ -173,9 +174,10 @@ console.log(`[done] ${Date.now() - t0}ms`);
 if (opt.manifest) {
   const payload = {
     input, window: r.window, threshold: r.threshold, summary: r.summary,
+    provenance: r.provenance,
     audio: r.audio ? { mean: r.audio.mean, peak: r.audio.peak, silences: r.audio.silences } : null,
     transcript: r.transcript,
-    plan: { cells: r.plan.cells, sheets: r.plan.sheets, adaptive: r.plan.adaptive, bursts: r.plan.bursts },
+    plan: r.plan,
     sheets: r.sheets.map((s) => ({
       sheet: s.sheet, cols: s.cols, rows: s.rows, width: s.width, height: s.height,
       stripH: s.stripH ?? null, cells: s.cells,

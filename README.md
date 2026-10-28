@@ -10,7 +10,7 @@
 >
 > **中文说明：[README.zh.md](./README.zh.md)** — 创新点、实现原理、实测基线、路线图。
 >
-> **Requires:** Node ≥ 20, `ffmpeg`/`ffprobe` on `PATH`. No other runtime dependencies.
+> **Requires:** Node ≥ 20, `ffmpeg`/`ffprobe` on `PATH` (or under `$DSH_HOME/tools/ffmpeg/bin`). No other runtime dependencies.
 
 ![storyboard produced by this tool](docs/demo.png)
 
@@ -144,7 +144,7 @@ window that holds a single cell. Window boundaries are **snapped to real cuts** 
 git clone https://github.com/SAOS-3624/dsh-video-storyboard.git
 cd dsh-video-storyboard
 
-node --test                                          # 154 tests (needs ffmpeg)
+node --test                                          # 282 tests (needs ffmpeg)
 node bin/storyboard.mjs your-video.mp4 --cells 9 --text   # see exactly what the model would get
 node bin/storyboard.mjs film.mp4 --batch 300              # long film: one png per 5-min window + a timeline.md
 node scripts/install-dev.mjs                         # mount into DSH, then restart DSH
@@ -193,7 +193,7 @@ Worth stating plainly, because it is easy to misread:
 | `src/cache.js` — scan-result cache keyed by file+window+threshold | ✅ implemented (2nd call on a 5-min clip: 13.4 s → 3.6 s) |
 
 ```bash
-npm test                                                  # 154 passing (unit + ffmpeg e2e + host contract)
+npm test                                                  # 282 passing (unit + ffmpeg e2e + host contract)
 node bin/scan-video.mjs video.mp4 9                       # 调阈值：切点 / 分数 / 段长 / top peaks
 node bin/storyboard.mjs video.mp4 --cells 9               # 端到端出一张图 + manifest
 node bin/storyboard.mjs film.mp4 --from 600 --to 780      # 只看某一段（不扫全片）
@@ -380,8 +380,9 @@ would walk up from this repo and never find the host package.
 
 After changing this package, re-run the script and restart again (the copy is a snapshot).
 
-The tool shows up as `video_storyboard`. Prerequisites: `ffmpeg`/`ffprobe` on `PATH`
-(or `DSH_FFMPEG_PATH` / `DSH_FFPROBE_PATH`).
+The tool shows up as `video_storyboard`. Prerequisites: `ffmpeg`/`ffprobe` on `PATH`, or in
+`$DSH_HOME/tools/ffmpeg/bin`, `$DSH_HOME/bin`, or `<install-root>/tools/ffmpeg/bin`
+(explicit `DSH_FFMPEG_PATH` / `DSH_FFPROBE_PATH` wins).
 
 **The schema is verified against the host, not against a copy of it.** `test/contract.test.mjs`
 imports the *real* `defineTool` / `validateArgs` from the installed `@deepseek-ai/dsh-tools` and

@@ -11,6 +11,7 @@
 import { spawn } from 'node:child_process';
 
 import { DEFAULT_FFMPEG } from './probe.js';
+import { describeMediaSearch } from './binaries.js';
 
 export const SCAN_W = 64;
 export const SCAN_H = 36;
@@ -226,7 +227,9 @@ export function scanShots(opts) {
     });
 
     child.stderr.on('data', (d) => { stderr += d.toString(); });
-    child.on('error', (err) => reject(new Error(`ffmpeg spawn failed: ${err.message}`)));
+    child.on('error', (err) => reject(new Error(
+      `ffmpeg spawn failed: ${err.message} (${describeMediaSearch('ffmpeg')})`,
+    )));
     child.on('close', (code) => {
       if (code !== 0) {
         reject(new Error(`ffmpeg exited ${code}: ${stderr.trim().split('\n').slice(-3).join(' | ')}`));

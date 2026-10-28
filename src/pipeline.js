@@ -10,7 +10,7 @@ import { resolveInput } from './fetch.js';
 import { loadTranscriptFile } from './transcript-file.js';
 import { scanShots } from './scan.js';
 import { fitSegments, segmentsFromCuts, totalDur } from './segments.js';
-import { bestLayout, groupByCount, suggest } from './plan.js';
+import { bestLayout, groupByCount, suggest, PLAN_THRESHOLDS } from './plan.js';
 import { findBursts, planCellRanges } from './density.js';
 import { describeMemory, remember } from './memory.js';
 import { analyzeAudio, describeAudio, detectOnsets } from './audio.js';
@@ -19,6 +19,7 @@ import {
   filterSuspectSegments, resolveAsrConfig, speechCurve, transcribeLong,
 } from './asr.js';
 import { cacheKey, pruneCache, withCache } from './cache.js';
+import { ffmpegVersion, sha256File } from './provenance.js';
 import {
   addAudioStrip, composeSheet, encodeRaw, encodePngBuffer, extractFrameRaw, extractSharpest, layoutCanvas,
 } from './sheet.js';
@@ -65,6 +66,7 @@ async function extractFrameWithFallback({ input, remote, at, dur, cellW, cellH, 
  * @param {number} [opts.minGap] 采样最小间隔
  * @param {'sharp'|'mid'|'thumb'} [opts.pick]
  * @param {'index'|'none'} [opts.burn]
+ * @param {boolean} [opts.sourceHash] 在清单里写源文件 SHA-256（默认关；大文件要整读一遍）
  * @param {number} [opts.badgeRatio]
  * @param {number} [opts.budget] 单图像素预算
  * @param {string} [opts.ffmpegPath]
@@ -83,6 +85,7 @@ export async function runStoryboard(opts) {
     burn = 'index',
     transcript = 'auto',
     transcriptFile,
+    sourceHash = false,
     frameSource = null,
     fetchOptions = null,
     audioStrip = true,
@@ -112,6 +115,15 @@ export async function runStoryboard(opts) {
     : null;
 
   const info = { ...(await probeVideo(input, { ffprobePath })), path: input };
+  // Provenance 是锦上添花：ffmpeg 版本缓存/失败不阻塞；hash 只在显式要求时算。
+  const [ffmpeg, sha256] = await Promise.all([
+    ffmpegVersion(ffmpegPath),
+    sourceHash ? sha256File(input).catch(() => 'unavailable') : Promise.resolve(null),
+  ]);
+  const provenance = {
+    ...(ffmpeg ? { ffmpeg } : {}),
+    ...(sourceHash ? { sha256 } : {}),
+  };
   const winStart = Math.max(0, Math.min(Number(from) || 0, Math.max(0, info.duration - 0.2)));
   const winEnd = Math.min(info.duration, Number(to) > 0 ? Number(to) : info.duration);
   const winDur = Math.max(0.2, winEnd - winStart);
@@ -226,6 +238,8 @@ export async function runStoryboard(opts) {
   const relSegments = (transcriptInfo?.segments ?? [])
     .map((seg) => ({ ...seg, from: seg.from - winStart, to: seg.to - winStart }))
     .filter((seg) => seg.to > 0 && seg.from < winDur);
+  // 窗口口径：transcriptFile 可能给的是整片，不能拿整片 chars 去除以 winDur。
+  const transcriptChars = relSegments.reduce((n, seg) => n + String(seg.text ?? '').length, 0);
   const speech = relSegments.length > 0
     ? speechCurve(relSegments, { duration: winDur })
     : null;
@@ -244,10 +258,11 @@ export async function runStoryboard(opts) {
   // ---- 格数：放在台词与音频之后，是为了让"口播多不多 / 是不是音乐驱动"参与决策
   let cells = Math.max(0, Number(opts.cells) || 0);
   let sheets = Math.max(0, Number(opts.sheets) || 0);
+  const autoPlan = cells === 0;
+  // 和 suggest() 用同一个口径；下面写进 plan.inputs，方便复现判定。
+  const speechRate = winDur > 0 ? transcriptChars / winDur : 0;
   let suggestion;
   if (cells === 0) {
-    const speechChars = relSegments.reduce((n, seg) => n + seg.text.length, 0);
-    const speechRate = winDur > 0 ? speechChars / winDur : 0;
     suggestion = suggest({
       duration: winDur,
       cuts: scan.cuts.length,
@@ -261,6 +276,22 @@ export async function runStoryboard(opts) {
     sheets = sheets || suggestion.sheets;
   }
   sheets = sheets || 1;
+  // 本次实际输入 + 生效阈值。只记录，不做成十几个可配置旋钮。
+  const planInfo = {
+    cells, sheets, adaptive, pick, burn, minGap,
+    reason: suggestion?.reason ?? 'explicit',
+    auto: autoPlan,
+    inputs: {
+      duration: +winDur.toFixed(2),
+      scanThreshold: scan.threshold,
+      meanLufs: Number.isFinite(audio?.mean) ? +audio.mean.toFixed(1) : null,
+      speechRate: +speechRate.toFixed(2),
+      motion: +(Number(scan.summary?.p90) || 0).toFixed(1),
+      cuts: scan.cuts.length,
+      hasSubtitle: Boolean(info.hasSubtitle),
+    },
+    thresholds: { ...PLAN_THRESHOLDS },
+  };
 
   // 两条路：自适应按密度分配格位（快切区多给格），否则退回"并段到 k 格"
   const relCuts = scan.cuts.map((c) => c.t - winStart);
@@ -307,9 +338,11 @@ export async function runStoryboard(opts) {
       audio: null,
       transcript: transcriptInfo
         ? { source: transcriptInfo.source, model: transcriptInfo.model ?? null,
-          segments: (transcriptInfo.segments ?? []).length }
+          segments: relSegments.length, chars: transcriptChars,
+          charsPerSec: +(transcriptChars / Math.max(1, winDur)).toFixed(2) }
         : null,
-      plan: { cells, sheets, adaptive, pick, burn, minGap, reason: suggestion?.reason ?? 'explicit', bursts: [] },
+      provenance,
+      plan: { ...planInfo, bursts: [] },
       sheets: [],
       cells: cellsMeta,
       textOnly: true,
@@ -383,6 +416,7 @@ export async function runStoryboard(opts) {
 
   return {
     info,
+    provenance,
     window: { from: winStart, to: winStart + winDur, duration: winDur },
     cuts: scan.cuts,
     summary: scan.summary,
@@ -402,11 +436,9 @@ export async function runStoryboard(opts) {
       : null,
     transcript: transcriptInfo
       ? { source: transcriptInfo.source, model: transcriptInfo.model ?? null,
-        segments: (transcriptInfo.segments ?? []).length,
-        // 全片口径（不是"格内文本"口径）：字/秒是判定内容类型最稳的一个数字
-        chars: (transcriptInfo.segments ?? []).reduce((n, seg) => n + String(seg.text ?? '').length, 0),
-        charsPerSec: +(((transcriptInfo.segments ?? []).reduce((n, seg) => n + String(seg.text ?? '').length, 0))
-          / Math.max(1, winDur)).toFixed(2),
+        segments: relSegments.length,
+        chars: transcriptChars,
+        charsPerSec: +(transcriptChars / Math.max(1, winDur)).toFixed(2),
         ...(transcriptInfo.chunks ? { chunks: transcriptInfo.chunks } : {}),
         ...(transcriptInfo.suspect ? {
           suspect: transcriptInfo.suspect, suspectDetail: transcriptInfo.suspectDetail,
@@ -416,8 +448,7 @@ export async function runStoryboard(opts) {
         ...(transcriptInfo.error ? { error: transcriptInfo.error } : {}) }
       : null,
     plan: {
-      cells, sheets, adaptive, pick, burn, minGap,
-      reason: suggestion?.reason ?? 'explicit',
+      ...planInfo,
       bursts: findBursts(relCuts, winDur).map((b) => ({
         from: +(b.from + winStart).toFixed(2), to: +(b.to + winStart).toFixed(2),
         shots: b.shots, density: b.density,
@@ -596,7 +627,7 @@ export function formatTimeline(rows, { title = 'batch timeline' } = {}) {
     `# ${title}`,
     '',
     `- windows: **${rows.length}** · total ${tc(total)} · cells ${totalCells} · transcript ${totalChars} chars`,
-    `- tokens: ${rows.length} image(s) ≈ **${rows.length * 384}** (one image per window)`,
+    `- tokens: ${rows.length} image(s) ≈ **${rows.length * 384}** (DSH estimate; one image per window)`,
     '',
     '| # | window | cells | cuts | chars | image |',
     '|---|---|---|---|---|---|',
@@ -605,6 +636,25 @@ export function formatTimeline(rows, { title = 'batch timeline' } = {}) {
     lines.push(`| ${r.index} | ${tc(r.from)}–${tc(r.to)} | ${r.cells} | ${r.cuts} | ${r.chars ?? 0} | \`${r.image}\` |`);
   }
   return lines.join('\n');
+}
+
+/**
+ * Compact, single-line record of the auto-plan inputs and effective thresholds.
+ * This is for reproducibility; it does not imply those thresholds are configurable.
+ */
+function formatPlanLine(plan) {
+  if (!plan?.inputs) return null;
+  const t = plan.thresholds ?? {};
+  const fmt = (v) => (v === null || v === undefined || (typeof v === 'number' && !Number.isFinite(v))
+    ? 'n/a' : String(v));
+  const mode = plan.auto ? 'auto' : 'explicit';
+  return `plan: ${mode} ${plan.cells} cells — ${plan.reason ?? 'auto'} · ` +
+    `meanLufs=${fmt(plan.inputs.meanLufs)} LUFS · ` +
+    `speechRate=${fmt(plan.inputs.speechRate)} chars/s · ` +
+    `motion=${fmt(plan.inputs.motion)} · cuts=${fmt(plan.inputs.cuts)} · ` +
+    `cutThreshold=${fmt(plan.inputs.scanThreshold)} · ` +
+    `thresholds musicLufs>${fmt(t.musicLufs)}, musicSpeechRate<${fmt(t.musicSpeechRate)}, ` +
+    `speechRateCut>${fmt(t.speechRateCut)}`;
 }
 
 /**
@@ -643,11 +693,17 @@ export function formatManifest(result, {
     : [1, total];
   const picked = all.filter((c) => c.i >= lo && c.i <= hi);
 
+  const cellAttr = hasSheets && Number.isFinite(sheet0?.cellW) && Number.isFinite(sheet0?.cellH)
+    ? ` cell="${sheet0.cellW}x${sheet0.cellH}"` : '';
+  const tokensAttr = hasSheets ? ` tokens="${result.sheets.length * 384} (DSH estimate)"` : '';
   const lines = [
     `<storyboard path="${info.path ?? 'video'}" duration="${info.duration.toFixed(2)}" ` +
       `window="${win.from.toFixed(2)}-${win.to.toFixed(2)}" ` +
       `image="${hasSheets ? `${sheet0.width}x${sheet0.height}` : 'none (text only)'}" ` +
       `grid="${plan.cells} cells x ${plan.sheets} image(s)" burn="${plan.burn}"` +
+      `${cellAttr}${tokensAttr}` +
+      `${result.provenance?.ffmpeg ? ` ffmpeg="${result.provenance.ffmpeg}"` : ''}` +
+      `${result.provenance?.sha256 ? ` sha256="${result.provenance.sha256}"` : ''}` +
       `${result.audio ? ` footer="audio-strip(${sheet0.stripH ?? 0}px)"` : ''}` +
       `${result.transcript?.source ? ` transcript="${result.transcript.source}"` : ''}` +
       (cellRange ? ` cells="${lo}-${hi} of ${total}"` : '') +
@@ -655,6 +711,8 @@ export function formatManifest(result, {
         ? ` cuts="${result.cuts.length} (avg ${(result.window.duration / Math.max(1, result.cuts.length)).toFixed(1)}s)"`
         : '') + '>',
   ];
+  const planLine = formatPlanLine(result.plan);
+  if (planLine) lines.push(planLine);
   if (result.audio) {
     lines.push('footer strip shares the timeline: teal bars = loudness (taller = louder), ' +
       'grey blocks = silence, yellow ticks = cut points.');

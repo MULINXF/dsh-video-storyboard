@@ -81,6 +81,7 @@ export async function apply(ctx) {
       minGap: args.minGap ?? 1.2,
       transcript: args.transcript ?? 'auto',
       transcriptFile: args.transcriptFile,
+      sourceHash: args.sourceHash === true,
       textOnly: args.textOnly === true,
       detail: args.detail ?? 'med',
       fetchOptions: {
@@ -123,6 +124,8 @@ export async function apply(ctx) {
         sheets: 1,
         pick: args.pick ?? 'sharp',
         burn: args.burn ?? 'index',
+        transcript: args.transcript ?? 'auto',
+        sourceHash: args.sourceHash === true,
         // 近距离重看时不再按密度挪格：窗口本来就短，均分更好预测
         adaptive: false,
         frameSource,
