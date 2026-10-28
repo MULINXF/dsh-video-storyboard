@@ -11,18 +11,19 @@
 
 ### Added
 
-- **Burst re-scan** (which turned out not to need a second scan at all). The coarse pass merges any two
-  cuts closer than `scanGap` (0.35 s), so shots shorter than that are invisible — and montage is entirely
-  below it. Windows the density curve flags as bursts are now re-decided from the per-frame scores the
-  coarse pass already returned, with a one-frame gap (`1.02 / fps`) and a threshold from the window's own
-  low decile. No second ffmpeg pass: 1.4 s instead of 5 s on the test clip.
+- **Cuts are now re-read per 2-second window instead of per "burst".** The earlier version only refined
+  windows that `findBursts` flagged, which fails exactly where it is needed most: when the whole film is
+  fast there is no burst, so nothing is refined at all (a 3 s / 18-shot clip returned 4 cuts). The window
+  test asks a local question instead — *can the coarse gap see what is in this window* — so it does not
+  depend on the film's average.
 
-  Measured on 12 s slow / 3 s of 18 shots / 10 s slow: **4 shots in the burst → 15**. The same clip's slow
-  hand movement is correctly left alone (its cuts average score 18 against 59 for real cuts), which is the
-  guard that matters — at a one-frame gap, camera motion and editing both look "dense".
+  Both decisions run on the same per-frame scores, so this costs no extra decode (1.4 s vs 5 s when it was a
+  second ffmpeg pass). Adopt the fine reading only when it finds more cuts, is not classified `motion`, and
+  its cuts average ≥ 25 in score (real cuts average 59, a slow pan 18).
 
-  Guards: the fine pass must find more cuts, must not be classified `motion`, and its cuts must average
-  ≥ 25 in score. Windows longer than 8 s are skipped (a 23 s window cost a pass for 28 → 29 cuts).
+  Measured: the all-fast synthetic clip **4 → 16 cuts** (true 17); the 12 s / 3 s / 10 s mix refines only the
+  flash; the concept PV goes 40 → 48 and the talking head 121 → 122, i.e. it now also catches real cuts the
+  0.35 s gap was merging (spot-checked one: 84.75 s really is a hard cut from the title card to the credits).
 
 - `video_storyboard({ scanGap })` — the minimum spacing between detected cuts, default 0.35 s. It is a
   different knob from `minGap` (which merges cells). Fast material needs it: the same 3 s / 18-shot clip

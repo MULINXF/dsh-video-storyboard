@@ -8,7 +8,7 @@
 import { probeVideo, DEFAULT_FFMPEG, DEFAULT_FFPROBE } from './probe.js';
 import { resolveInput } from './fetch.js';
 import { loadTranscriptFile } from './transcript-file.js';
-import { decideCuts, scanShots } from './scan.js';
+import { decideCuts, scanShots, suppressClose } from './scan.js';
 import { fitSegments, segmentsFromCuts, totalDur } from './segments.js';
 import { bestLayout, groupByCount, suggest, PLAN_THRESHOLDS } from './plan.js';
 import { findBursts, planCellRanges } from './density.js';
@@ -157,7 +157,7 @@ export async function runStoryboard(opts) {
   let cuts = scan.cuts;
   let refinedBursts = [];
   if (refineBursts && !precomputed && !textOnly) {
-    const r = refineBurstCuts({ stats: scan.stats, cuts, fps: info.fps, winStart, winDur });
+    const r = refineCutsByWindow({ stats: scan.stats, coarseCuts: cuts, fps: info.fps, winStart, winDur });
     cuts = r.cuts;
     refinedBursts = r.refined;
   }
@@ -502,47 +502,65 @@ export async function runStoryboard(opts) {
 const MIN_REFINE_SCORE = 25;
 
 /**
- * 爆点细扫：**不重新读视频**，只是拿粗扫已经算好的逐帧分数（stats）重新判定一次。
+ * 逐窗口重判：**先算画面差异，再按窗口决定用多细的间隔去数刀。**
  *
- * 一开始我写成了"再跑一遍 ffmpeg、把间隔调小"——那是多余的：`scanShots` 本来就把每一帧的
- * 分数全量返回了，改个阈值和最小间隔重判即可，零 IO。
+ * 早先的版本靠 `findBursts` 找爆点再细判，那有个死穴：整片都快时，"到处一样快"就没有爆点，
+ * 于是全片都被 0.35s 的间隔压扁（实测 3 秒 18 镜的素材只数出 4 刀）。
  *
- * 判定用的是**一帧**的间隔（1/fps），所以"每帧剪一下"这种剪法也数得出来。
- * 但这么细的间隔会把运镜也切成密集的刀，所以采纳前要过三道闸：
- *   1) 细判必须数出更多刀
- *   2) 不能被判成 motion（连续运镜）
- *   3) 这些刀的分数要够大（真剪辑一次性换画面，运镜每帧只挪一点）
+ * 改成逐个 2 秒窗口判断，问的问题变成"**这个窗口的刀，粗间隔看得见吗**"，是局部且绝对的，
+ * 跟全片平均无关。采纳条件三条：
+ *   1) 细判（一帧间隔）确实数出更多刀
+ *   2) 没被判成 motion（连续运镜每帧都在变，但幅度小）
+ *   3) 这些刀的分数均值 ≥ 25（真剪辑一次性换画面，运镜每帧只挪一点）
+ *
+ * 细判不需要重新读盘：两套判定都跑在同一份逐帧分数上。
  *
  * @returns {{cuts:Array, refined:Array<{from:number,to:number,coarse:number,fine:number}>}}
  */
-export function refineBurstCuts({
-  stats, cuts, fps, winStart, winDur, maxBursts = 3, minCoarse = 3, maxBurstSpan = 8, minScore = MIN_REFINE_SCORE,
+export function refineCutsByWindow({
+  stats, fps, coarseCuts, winStart = 0, winDur, winSec = 2, minScore = MIN_REFINE_SCORE,
 }) {
-  const bursts = findBursts(cuts.map((c) => c.t - winStart), winDur).slice(0, maxBursts);
-  // 一帧的间隔：0.04s 是 25fps 下一帧的长度，更快就没有意义了
-  const gap = Math.max(1.02 / Math.max(1, fps), 0.04);
-  let out = cuts.slice();
+  const span = winDur ?? (stats.length ? stats[stats.length - 1].t - winStart : 0);
+  const gap = Math.max(1.02 / Math.max(1, fps), 0.04);     // 一帧：25fps 下 0.041s
+  const out = [];
   const refined = [];
-  for (const b of bursts) {
-    const from = winStart + b.from;
-    const to = winStart + b.to;
-    if (to - from < 1) continue;
-    // 爆点是"一小段"，不是"后半部"。23 秒的窗口重判过一次，28 刀 → 29 刀，那是密度曲线的拖尾
-    if (to - from > maxBurstSpan) continue;
-    const coarse = out.filter((c) => c.t >= from && c.t < to).length;
-    if (coarse < minCoarse) continue;
+  let open = null;                                          // 正在进行的采纳区间
 
+  for (let w = 0; w < span; w += winSec) {
+    const from = winStart + w;
+    const to = winStart + Math.min(span, w + winSec);
     const windowStats = stats.filter((s) => s.t >= from && s.t < to);
-    const fine = decideCuts(windowStats, { threshold: 'auto-low', minGap: gap, duration: to - from });
-    if (fine.degraded === 'motion') continue;
-    if (fine.cuts.length <= coarse) continue;
-    const meanScore = fine.cuts.reduce((a, c) => a + (c.score ?? 0), 0) / Math.max(1, fine.cuts.length);
-    if (meanScore < minScore) continue;
+    const coarse = coarseCuts.filter((c) => c.t >= from && c.t < to);
+    if (windowStats.length < 4) { out.push(...coarse); continue; }
 
-    out = out.filter((c) => !(c.t >= from && c.t < to)).concat(fine.cuts).sort((a, b) => a.t - b.t);
-    refined.push({ from: +from.toFixed(2), to: +to.toFixed(2), coarse, fine: fine.cuts.length });
+    const fine = decideCuts(windowStats, { threshold: 'auto-low', minGap: gap, duration: to - from });
+    const mean = fine.cuts.reduce((a, c) => a + (c.score ?? 0), 0) / Math.max(1, fine.cuts.length);
+    const adopt = fine.cuts.length > coarse.length
+      && fine.degraded !== 'motion'
+      && mean >= minScore;
+
+    if (adopt) {
+      out.push(...fine.cuts);
+      const n = out.length;
+      if (open && Math.abs(open.to - from) < 1e-6) { open.to = to; open.fine = n; }
+      else {
+        if (open) refined.push({ from: open.from, to: open.to, coarse: open.coarse, fine: open.count });
+        open = { from, to, coarse: coarse.length, count: 0, fine: 0 };
+      }
+      open.count += fine.cuts.length;
+    } else {
+      out.push(...coarse);
+      if (open) { refined.push({ from: open.from, to: open.to, coarse: open.coarse, fine: open.count }); open = null; }
+    }
   }
-  return { cuts: out, refined };
+  if (open) refined.push({ from: open.from, to: open.to, coarse: open.coarse, fine: open.count });
+
+  return {
+    cuts: suppressClose(out.sort((a, b) => a.t - b.t), gap),
+    refined: refined.map((r) => ({
+      from: +r.from.toFixed(2), to: +r.to.toFixed(2), coarse: r.coarse, fine: r.fine,
+    })),
+  };
 }
 
 /** 把结果编码成 PNG 落盘（CLI 用；插件走附件服务，不落盘） */

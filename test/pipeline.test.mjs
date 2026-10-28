@@ -324,3 +324,39 @@ test('formatRemoteProbe: 匿名时明确警告分辨率不保证', async () => {
   });
   assert.match(text, /auth: anonymous \(resolution not guaranteed\)/);
 });
+
+/* ---------------------------------------------------------------- 逐窗口重判 */
+
+const fps25 = 25;
+// 每 4 帧一刀（25fps 下 6.25 刀/秒）—— 这是快闪的常见密度；每 2 帧一刀会稠到
+// 和运镜无法区分（degraded 会判 motion），那不是这个测试要验证的东西。
+const gapFrames = (n, score, from = 0) => Array.from({ length: n }, (_, i) => ({
+  t: from + i / fps25, score: i % 4 === 3 ? score : 3,
+}));
+const smooth = (n, score, from = 0) => Array.from({ length: n }, (_, i) => ({
+  t: from + i / fps25, score,
+}));
+
+test('refineCutsByWindow: 快闪窗口被细判，运镜窗口保持粗判', async () => {
+  const { refineCutsByWindow } = await import('../src/pipeline.js');
+  // 0-2s：每两帧一刀、分数 70（真剪辑）；2-4s：每帧都在变但只有 15 分（运镜）
+  const stats = [...gapFrames(50, 70, 0), ...smooth(50, 15, 2)];
+  const coarse = [{ t: 0.5, score: 70 }, { t: 4.9, score: 15 }];
+  const r = refineCutsByWindow({ stats, fps: fps25, coarseCuts: coarse, winStart: 0, winDur: 4, winSec: 2 });
+  const inFlash = r.cuts.filter((c) => c.t < 2).length;
+  const inPan = r.cuts.filter((c) => c.t >= 2).length;
+  assert.ok(inFlash >= 10, `快闪窗口应细判出很多刀，实得 ${inFlash}`);
+  assert.ok(inPan <= 2, `运镜窗口不该被细判，实得 ${inPan}`);
+  assert.equal(r.refined.length, 1);
+  assert.equal(r.refined[0].from, 0);
+});
+
+test('refineCutsByWindow: 分数不够大时不采纳（宁可少报）', async () => {
+  const { refineCutsByWindow } = await import('../src/pipeline.js');
+  // 同样密，但每刀只有 20 分 —— 低于 25 的门槛
+  const stats = gapFrames(50, 20, 0);
+  const coarse = [{ t: 0.5, score: 20 }];
+  const r = refineCutsByWindow({ stats, fps: fps25, coarseCuts: coarse, winStart: 0, winDur: 2, winSec: 2 });
+  assert.equal(r.refined.length, 0, '不该采纳');
+  assert.equal(r.cuts.length, 1, '应保留粗判结果');
+});
