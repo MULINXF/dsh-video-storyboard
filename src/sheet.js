@@ -179,6 +179,31 @@ export function composeSheet(opts) {
   return { buffer: buf, width, height, cellW, cellH };
 }
 
+/**
+ * 把一格摊成 k×k 的小格（rawvideo rgb24），拼成一张 cellW×cellH 的图。
+ *
+ * 为什么这么做：快闪段里"这一格到底闪了几下"用一张代表帧说不清。把这一格再切成
+ * 3×3 或 4×4，同样一张图（同样 384 token）就能交代 9 个或 16 个瞬间。
+ * 代价是每个子帧只有 1/k² 的像素 —— 所以调用方必须先确认父格够大（见 chooseSubGrid）。
+ *
+ * @param {Buffer[]} tiles 长度必须等于 k*k，每个 tileW×tileH（rgb24）
+ */
+export function tileSubFrames(tiles, k, cellW, cellH) {
+  const tileW = Math.floor(cellW / k);
+  const tileH = Math.floor(cellH / k);
+  const out = Buffer.alloc(cellW * cellH * 3);
+  for (let i = 0; i < k * k; i++) {
+    const src = tiles[i];
+    if (!src) continue;
+    const ox = (i % k) * tileW;
+    const oy = Math.floor(i / k) * tileH;
+    for (let row = 0; row < tileH; row++) {
+      src.copy(out, ((oy + row) * cellW + ox) * 3, row * tileW * 3, row * tileW * 3 + tileW * 3);
+    }
+  }
+  return out;
+}
+
 /** 把一格 rawvideo（尺寸必须等于 cellW×cellH）贴到画布上 */
 export function blit(dst, dstW, dstH, x, y, cellW, cellH, src) {
   const need = cellW * cellH * 3;

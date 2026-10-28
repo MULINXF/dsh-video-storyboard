@@ -21,6 +21,21 @@
 
 ### Added
 
+- **Fast cells are tiled into k×k sub-frames.** A cell covering a montage used to show one representative
+  frame, so "this stretch flashed nine times" was a number in the text and nothing else. When a cell's shot
+  density is high (≥ 0.7 shots/s, i.e. average shot ≤ 1.4 s) it is now rendered as a k×k contact sheet —
+  k = ceil(√shots), capped at 4 and by k×k sub-frame size ≥ 100×56 px. **Token cost is unchanged**: it is
+  still one image.
+
+  Measured on the concept PV at `cells: 6`: the three montage cells became 4×4 (16 frames each) while the
+  slow cells stayed full size, and the credits frame stayed readable. The talking-head clip's cells sit at
+  0.4–0.6 shots/s, so nothing is tiled there — the density gate is what keeps this from shredding ordinary
+  narrative pacing.
+
+  Two guards from measurement: sub-frames below 100×56 stop being distinguishable (110×61 was the floor in
+  the tiling experiment), and tiling costs k²−1 extra frame extractions, so each sheet has a budget of 32
+  extra frames and steps down k rather than blowing up render time.
+
 - **Cuts are now re-read per 2-second window instead of per "burst".** The earlier version only refined
   windows that `findBursts` flagged, which fails exactly where it is needed most: when the whole film is
   fast there is no burst, so nothing is refined at all (a 3 s / 18-shot clip returned 4 cuts). The window

@@ -360,3 +360,28 @@ test('refineCutsByWindow: 分数不够大时不采纳（宁可少报）', async 
   assert.equal(r.refined.length, 0, '不该采纳');
   assert.equal(r.cuts.length, 1, '应保留粗判结果');
 });
+
+/* ---------------------------------------------------------------- 子格摊开 */
+
+test('chooseSubGrid: 按密度决定，不看镜头数', async () => {
+  const { chooseSubGrid } = await import('../src/pipeline.js');
+  // 15 秒 5 个镜头（0.33/s）是正常叙事节奏，不该摊
+  assert.equal(chooseSubGrid({ shots: 5, dur: 15, cellW: 499, cellH: 278 }), 1);
+  // 同样 5 个镜头挤在 3 秒里（1.7/s）就是快闪，该摊
+  assert.ok(chooseSubGrid({ shots: 5, dur: 3, cellW: 499, cellH: 278 }) >= 2);
+});
+
+test('chooseSubGrid: 子帧小于 100×56 就降档，3×3 布局不切 4×4', async () => {
+  const { chooseSubGrid } = await import('../src/pipeline.js');
+  // 331/4 = 82 < 100 → 最多 3×3
+  assert.equal(chooseSubGrid({ shots: 20, dur: 5, cellW: 331, cellH: 184 }), 3);
+  // 499/4 = 124 ≥ 100 → 允许 4×4
+  assert.equal(chooseSubGrid({ shots: 20, dur: 5, cellW: 499, cellH: 278 }), 4);
+  // 太小的格子完全不摊
+  assert.equal(chooseSubGrid({ shots: 20, dur: 5, cellW: 180, cellH: 100 }), 1);
+});
+
+test('chooseSubGrid: 镜头少到不值得摊时保持整格', async () => {
+  const { chooseSubGrid } = await import('../src/pipeline.js');
+  assert.equal(chooseSubGrid({ shots: 2, dur: 1, cellW: 499, cellH: 278 }), 1);
+});

@@ -9,7 +9,7 @@ import { promisify } from 'node:util';
 import {
   BACKGROUND, BADGE_FG, DIGITS, DIGIT_H, DIGIT_W, PAD_FILL,
   badgeScale, composeSheet, drawBadge, drawGlyphs, encodeRaw, extractFrameRaw,
-  extractSharpest, fillRect, layoutCanvas, sharpness,
+  extractSharpest, fillRect, layoutCanvas, sharpness, tileSubFrames,
   STRIP_BAR, addAudioStrip,
 } from '../src/sheet.js';
 import { DEFAULT_FFMPEG, probeVideo } from '../src/probe.js';
@@ -337,3 +337,17 @@ test('addAudioStrip: 柱子画在灰块之上（灰块只在柱子上方露出�
   assert.ok(isBar(row(stripH - 1)), '柱子应压在灰块之上（最底行是青色）');
 });
 
+
+test('tileSubFrames: k×k 贴回一格，位置正确', () => {
+  const k = 2, cellW = 8, cellH = 8;
+  const tw = cellW / k, th = cellH / k;
+  // 四块分别填 10/20/30/40，检查它们落在四个象限
+  const tiles = [10, 20, 30, 40].map((v) => Buffer.alloc(tw * th * 3, v));
+  const out = tileSubFrames(tiles, k, cellW, cellH);
+  const at = (x, y) => out[(y * cellW + x) * 3];
+  assert.equal(at(0, 0), 10);              // 左上
+  assert.equal(at(cellW - 1, 0), 20);      // 右上
+  assert.equal(at(0, cellH - 1), 30);      // 左下
+  assert.equal(at(cellW - 1, cellH - 1), 40); // 右下
+  assert.equal(out.length, cellW * cellH * 3);
+});

@@ -23,6 +23,7 @@ import { ffmpegVersion, sha256File } from './provenance.js';
 import { findInjection } from './injection.js';
 import {
   addAudioStrip, composeSheet, encodeRaw, encodePngBuffer, extractFrameRaw, extractSharpest, layoutCanvas,
+  tileSubFrames,
 } from './sheet.js';
 
 export const PICK_MODES = ['sharp', 'mid', 'thumb'];// 只有两种：时间码不烧进画面 —— 它占像素、压缩后先糊，而清单里已经有 0.01 秒精度的时间。
@@ -393,16 +394,30 @@ export async function runStoryboard(opts) {
     const aligned = alignCells(group, transcriptInfo?.segments ?? []);
     const frames = [];
     const cellMeta = [];
+    // 摊格子要额外取 k²−1 帧（4×4 就是 15 次 ffmpeg）。整张图最多多取 32 帧，
+    // 否则一支全是快闪的片子会变成"每格取 16 张"，渲染时间翻十几倍。
+    let subBudget = 32;
     for (const [gi, { from: a, to: b }] of group.entries()) {
       index += 1;
-      const frame = await extractFrameWithFallback({
-        input, remote: remoteFrame, at: a, dur: b - a, cellW, cellH, ffmpegPath, pick,
-      });
+      // 这一格里切了几刀 —— 快闪蒙太奇的"速度"就是这个数字，模型不用自己数刻度
+      const cellCuts = cuts.filter((c) => c.t >= a && c.t < b).length;
+      let sub = chooseSubGrid({ shots: cellCuts + 1, cellW, cellH, dur: b - a });
+      while (sub > 1 && sub * sub - 1 > subBudget) sub -= 1;   // 预算不够就降档，降不下去就整格
+      if (sub > 1) subBudget -= sub * sub - 1;
+      let frame;
+      if (sub > 1) {
+        // 快闪格：摊成 k×k，一张图交代 k² 个瞬间（token 不变）
+        frame = await extractSubTile({
+          input, remote: remoteFrame, a, b, k: sub, cellW, cellH, ffmpegPath,
+        });
+      } else {
+        frame = await extractFrameWithFallback({
+          input, remote: remoteFrame, at: a, dur: b - a, cellW, cellH, ffmpegPath, pick,
+        });
+      }
       if (frame.via === 'local-fallback') fallbacks += 1;
       frames.push({ buffer: frame.buffer, index });
       const text = aligned[gi] ?? null;
-      // 这一格里切了几刀 —— 快闪蒙太奇的"速度"就是这个数字，模型不用自己数刻度
-      const cellCuts = cuts.filter((c) => c.t >= a && c.t < b).length;
       cellMeta.push({
         i: index,
         sheet: si + 1,
@@ -410,6 +425,7 @@ export async function runStoryboard(opts) {
         t_end: +b.toFixed(3),
         t_frame: +frame.t.toFixed(3),
         ...(cellCuts > 0 ? { cuts: cellCuts } : {}),
+        ...(sub > 1 ? { sub } : {}),
         ...(frame.sharp !== undefined ? { sharp: +frame.sharp.toFixed(1) } : {}),
         ...(text?.text ? { text: text.text, charsPerSec: text.charsPerSec } : {}),
       });
@@ -499,6 +515,27 @@ export async function runStoryboard(opts) {
  *
  * @returns {{cuts:Array, refined:Array<{from:number,to:number,coarse:number,fine:number}>}}
  */
+/**
+ * 这一格要不要摊成 k×k 子格？返回 k（1 = 不摊）。
+ *
+ * 判据（都来自实测）：
+ *  - 镜头数少不值得摊：4 个镜头以下摊开只是把画面切碎；
+ *  - k ≈ ceil(sqrt(镜头数))，上限 4 —— 让子帧数刚好覆盖镜头数，不多抽重复帧；
+ *  - 子帧不能小于 100×56：再小就只剩色块（实测 110×61 是"能分辨不同镜头"的下限）。
+ */
+export function chooseSubGrid({
+  shots, cellW, cellH, dur, minShots = 4, minRate = 0.7, minSubW = 100, minSubH = 56,
+}) {
+  if (!(shots >= minShots)) return 1;
+  // **密度才是判据，不是镜头数**：15 秒里 5 个镜头是正常的叙事节奏，
+  // 把这种格子摊成 9 张只会毁掉"这段整体长什么样"。只有平均镜头短于 ~1.4 秒（≥0.7 刀/秒）
+  // 才算快闪，才值得摊。
+  if (dur > 0 && shots / dur < minRate) return 1;
+  let k = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(shots))));
+  while (k > 1 && (cellW / k < minSubW || cellH / k < minSubH)) k -= 1;
+  return k > 1 ? k : 1;
+}
+
 const MIN_REFINE_SCORE = 25;
 // 整窗平均分高于这个值 → 认为"几乎每帧都在大改"（每帧一剪）。
 // 实测：真每帧一剪 44.5，概念 PV 的快剪窗口 12–18，所以 30 能把两者分开。
@@ -524,6 +561,7 @@ export function refineCutsByWindow({
   stats, fps, coarseCuts, winStart = 0, winDur, winSec = 2, minScore = MIN_REFINE_SCORE,
 }) {
   const span = winDur ?? (stats.length ? stats[stats.length - 1].t - winStart : 0);
+  void span;
   // 间隔要按内容选：
   //   - 普通快闪：间隔略大于一帧（1.02/fps），避免同一个镜头的相邻帧被判成两刀；
   //   - **每帧一剪**：整窗平均分很高（实测 44，普通快闪只有 12–18），这时才把间隔压到一帧以下，
@@ -534,10 +572,13 @@ export function refineCutsByWindow({
   let open = null;
   let finalGap = Math.max(1.02 / Math.max(1, fps), 0.04);   // 收尾合并用的间隔（遇到每帧一剪会调小）                                          // 正在进行的采纳区间
 
-  for (let w = 0; w < span; w += winSec) {
-    const from = winStart + w;
-    const to = winStart + Math.min(span, w + winSec);
-    const windowStats = stats.filter((s) => s.t >= from && s.t < to);
+  // 按下标切窗口：stats 是等间隔的，用 slice 比每窗 filter 全量快几个量级
+  // （60 分钟片子 90k 帧、1800 个窗口，原来每窗都扫全量 = 1.6 亿次比较）
+  const perWin = Math.max(4, Math.round(winSec * Math.max(1, fps)));
+  for (let i0 = 0; i0 < stats.length; i0 += perWin) {
+    const windowStats = stats.slice(i0, i0 + perWin);
+    const from = windowStats[0].t;
+    const to = windowStats[windowStats.length - 1].t + 1 / Math.max(1, fps);
     const coarse = coarseCuts.filter((c) => c.t >= from && c.t < to);
     if (windowStats.length < 4) { out.push(...coarse); continue; }
 
@@ -577,6 +618,26 @@ export function refineCutsByWindow({
       from: +r.from.toFixed(2), to: +r.to.toFixed(2), coarse: r.coarse, fine: r.fine,
     })),
   };
+}
+
+/**
+ * 把一格摊成 k×k：取 k² 个等距子帧，拼回一张 cellW×cellH 的图。
+ * 子帧用 `mode:'mid'`（不做 3 候选锐度挑选）—— 一格里要取 9~16 张，再挑三倍会让这一步变成瓶颈。
+ */
+async function extractSubTile({ input, remote, a, b, k, cellW, cellH, ffmpegPath }) {
+  const tileW = Math.floor(cellW / k);
+  const tileH = Math.floor(cellH / k);
+  const n = k * k;
+  const tiles = [];
+  for (let i = 0; i < n; i++) {
+    const at = a + (b - a) * ((i + 0.5) / n);
+    const t = await extractFrameRaw({
+      input: remote?.url ?? input, at, dur: 0, cellW: tileW, cellH: tileH,
+      ffmpegPath, http: remote ? { headers: remote.headers } : undefined, mode: 'mid',
+    });
+    tiles.push(t.buffer);
+  }
+  return { buffer: tileSubFrames(tiles, k, cellW, cellH), t: a + (b - a) / 2 };
 }
 
 /** 把结果编码成 PNG 落盘（CLI 用；插件走附件服务，不落盘） */
@@ -887,7 +948,7 @@ export function formatManifest(result, {
     const r = result.refinedBursts
       .map((b) => `${tc(b.from)}-${tc(b.to)} ${b.fine} shots (coarse saw ${b.coarse})`)
       .join(', ');
-    lines.push(`re-scanned at 0.12s granularity: ${r} — these counts include cuts the coarse pass merged away.`);
+    lines.push(`re-read at one-frame granularity: ${r} — these include cuts the coarse pass merged away.`);
   }
 
   // 快剪爆发点：只给"密度"和"每格几刀"还不够——模型不知道"哪一段是连拍的"。
@@ -931,7 +992,9 @@ export function formatManifest(result, {
     const showFrame = plan.pick === 'sharp' && Number.isFinite(c.t_frame);
     const head = `cell ${c.i}${where} = ${tc(c.t_start)}-${tc(c.t_end)}` +
       (showFrame ? ` frame@${tc(c.t_frame)}` : '') +
-      (c.cuts ? `  cuts ${c.cuts}` : '');
+      (c.cuts ? `  cuts ${c.cuts}` : '') +
+      // 被摊开的格子要说清里面有几张：否则模型会以为那是一整张画面
+      (c.sub ? `  ${c.sub * c.sub} frames (${c.sub}×${c.sub})` : '');
     const body = text ? `${head}\n    "${text}"` : head;
     if (used + body.length + 1 > maxChars) { stoppedAt = c.i - 1; break; }
     lines.push(body);

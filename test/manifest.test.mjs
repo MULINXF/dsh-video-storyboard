@@ -291,12 +291,12 @@ test('formatManifest: 细扫过的窗口要说明"粗扫看不见的刀"', () =>
   const r = makeResult({ cells: 4 });
   r.refinedBursts = [{ from: 11.9, to: 14.6, coarse: 4, fine: 15 }];
   const text = formatManifest(r, { maxChars: 200_000 });
-  assert.match(text, /re-scanned at 0\.12s granularity/);
+  assert.match(text, /re-read at one-frame granularity/);
   assert.match(text, /00:11\.90-00:14\.60 15 shots \(coarse saw 4\)/);
 });
 
 test('formatManifest: 没有细扫时不该出现这一行', () => {
   const r = makeResult({ cells: 4 });
   const text = formatManifest(r, { maxChars: 200_000 });
-  assert.ok(!/re-scanned at/.test(text));
+  assert.ok(!/re-read at one-frame/.test(text));
 });
