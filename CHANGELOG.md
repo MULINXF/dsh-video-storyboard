@@ -20,8 +20,14 @@
   The server also grew its own backstop: `ASR_IDLE_EXIT_S` (default 600 s, `start-asr.cmd` sets it) makes it
   exit on its own when nothing calls it, so even a manually launched copy cannot sit there forever.
 
-  Measured end to end with the service down: one storyboard call took 42.2 s (≈35 s of model load) and came
-  back with `transcript: asr` instead of `asr-failed`.
+  Measured end to end with the service down: one storyboard call took 42.2 s and came back with
+  `transcript: asr` instead of `asr-failed`. Cold start alone is **30.3 s** (spawn → `/health` ok); a warm
+  call adds nothing.
+
+  Stopping through a pid was the wrong idea: `start /b` returns a shell that exits immediately, so the pid we
+  held was already dead while python kept the memory. The service now exposes `POST /shutdown` and the plugin
+  asks it to exit — verified: request returns `true`, endpoint is gone 1.5 s later, and the idle timer stops it
+  on schedule (alive at 2 s, dead at 5 s with `idleMs: 3000`).
 
 ## [0.4.1] — 2026-10-28
 

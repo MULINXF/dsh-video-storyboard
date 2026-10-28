@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { __pendingPid, __resetLifecycle, ensureAsr, keepAlive, lifecycleConfig, probeEndpoint, scheduleStop } from '../src/asr-lifecycle.js';
+import { __resetLifecycle, ensureAsr, keepAlive, lifecycleConfig, portOf, probeEndpoint, scheduleStop, stopViaHttp } from '../src/asr-lifecycle.js';
 
 test('lifecycleConfig: 没配 manage.start 就不托管', () => {
   assert.equal(lifecycleConfig({}), null);
@@ -78,4 +78,19 @@ test('scheduleStop: 到点才停；中途 keepAlive 会取消', async () => {
   keepAlive();
   await new Promise((r) => setTimeout(r, 60));
   assert.equal(killed, 1, 'keepAlive 之后不该再停');
+});
+
+test('portOf: 从 baseUrl 抠端口，没有端口用协议默认', () => {
+  assert.equal(portOf('http://127.0.0.1:8000/v1'), 8000);
+  assert.equal(portOf('http://example.com/v1'), 80);
+  assert.equal(portOf('https://example.com/v1'), 443);
+});
+
+test('stopViaHttp: 服务支持 /shutdown 时返回 true，拒绝时返回 false', async () => {
+  const ok = await stopViaHttp('http://127.0.0.1:8000/v1', { fetchImpl: async () => ({ ok: true }) });
+  assert.equal(ok, true);
+  const bad = await stopViaHttp('http://127.0.0.1:8000/v1', { fetchImpl: async () => ({ ok: false }) });
+  assert.equal(bad, false);
+  const dead = await stopViaHttp('http://127.0.0.1:8000/v1', { fetchImpl: async () => { throw new Error('down'); } });
+  assert.equal(dead, false);
 });

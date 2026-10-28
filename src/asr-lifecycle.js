@@ -51,6 +51,60 @@ export async function probeEndpoint(baseUrl, { fetchImpl = fetch, timeoutMs = 15
   return false;
 }
 
+/**
+ * 让服务自己退出（POST /shutdown）。比按 pid 杀可靠得多 ——
+ * Windows 上 start 出来的壳进程会先退出，真正的 pid 谁也拿不到。
+ * 服务若不支持这个端点（返回 404），调用方再退回按端口杀。
+ */
+export async function stopViaHttp(baseUrl, { fetchImpl = fetch, timeoutMs = 3000 } = {}) {
+  const root = String(baseUrl ?? '').replace(/\/v1\/?$/, '').replace(/\/$/, '');
+  if (!root) return false;
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    const res = await fetchImpl(`${root}/shutdown`, { method: 'POST', signal: ctrl.signal });
+    clearTimeout(timer);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** 从 baseUrl 里抠出端口（默认 80/443） */
+export function portOf(baseUrl) {
+  try {
+    const u = new URL(String(baseUrl).replace(/\/v1\/?$/, ''));
+    return Number(u.port) || (u.protocol === 'https:' ? 443 : 80);
+  } catch {
+    return 8000;
+  }
+}
+
+/**
+ * 找出监听这个端口的进程号。
+ *
+ * 为什么需要：Windows 上 `start /b script.cmd` 会**立刻退出**，我们手上那个 pid 是壳的，
+ * 壳一退就没了句柄 —— 而真正吃内存的 python 还在。只能按端口反查。
+ */
+export async function findPidByPort(port, { execImpl } = {}) {
+  const run = execImpl ?? (await import('node:child_process')).execFile;
+  const cmdline = process.platform === 'win32'
+    ? ['netstat', ['-ano', '-p', 'tcp']]
+    : ['lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t']];
+  return await new Promise((resolve) => {
+    run(cmdline[0], cmdline[1], { timeout: 4000 }, (err, stdout) => {
+      if (err || !stdout) return resolve(null);
+      if (process.platform === 'win32') {
+        const line = stdout.split(/\r?\n/).find((l) => new RegExp(`[:.]${port}\\s.*LISTENING`, 'i').test(l));
+        const m = line && line.trim().match(/(\d+)\s*$/);
+        resolve(m ? Number(m[1]) : null);
+      } else {
+        resolve(Number(stdout.trim().split(/\s+/)[0]) || null);
+      }
+    });
+  });
+}
+
 /* 只保留一个"待停止"的定时器：连续几次调用应该共用一个实例，而不是起了又杀 */
 let pendingStop = null;
 let ownedChild = null;
@@ -99,7 +153,10 @@ export async function ensureAsr({
     if (await probeEndpoint(baseUrl, { fetchImpl, healthPath: life.healthPath })) {
       log('local ASR is ready');
       keepAlive();
-      return { owned: true, started: true, pid: child.pid };
+      // 壳进程可能已经退了，按端口找出真正在听的那个
+      const real = await findPidByPort(portOf(baseUrl ?? ''));
+      if (real) ownedChild = { pid: real };
+      return { owned: true, started: true, pid: real ?? child.pid };
     }
   }
   return { owned: true, started: true, pid: child.pid, timedOut: true };
@@ -109,7 +166,7 @@ export async function ensureAsr({
  * 运行结束后安排停止。只有 owned 的实例才会被停。
  * 到点前如果又来了请求（keepAlive），这次停止会被取消。
  */
-export function scheduleStop({ owned, config, killImpl } = {}) {
+export function scheduleStop({ owned, config, killImpl, baseUrl } = {}) {
   if (!owned) return false;
   const life = lifecycleConfig(config);
   if (!life) return false;
@@ -119,16 +176,24 @@ export function scheduleStop({ owned, config, killImpl } = {}) {
     pendingStop = null;
     try {
       if (killImpl) killImpl(pid, life);
-      else if (pid) {
-        // Windows 要连子进程一起杀（start.cmd 会再起 python）；其它平台发 SIGTERM
+      else if (baseUrl && life.quietShutdown !== false) {
+        // 首选：请它自己退出（服务端 /shutdown）；不支持时再按端口杀
+        stopViaHttp(baseUrl).then((ok) => {
+          if (ok || !pid) return;
+          if (process.platform === 'win32') {
+            import('node:child_process')
+              .then(({ execFile }) => execFile('taskkill', ['/PID', String(pid), '/T', '/F'], () => {}))
+              .catch(() => {});
+          } else { try { process.kill(pid, 'SIGTERM'); } catch { /* 已退出 */ } }
+        }).catch(() => {});
+      } else if (pid) {
         if (process.platform === 'win32') {
-          process.kill(pid);
-          // detached 的 shell 子进程不会跟着死，补一刀 taskkill /T
-          import('node:child_process').then(({ execFile }) => {
-            execFile('taskkill', ['/PID', String(pid), '/T', '/F'], () => {});
-          }).catch(() => {});
+          // 连子树一起杀；start /b 起的 python 不在我们的句柄里，只能靠 /T
+          import('node:child_process')
+            .then(({ execFile }) => execFile('taskkill', ['/PID', String(pid), '/T', '/F'], () => {}))
+            .catch(() => {});
         } else {
-          process.kill(pid, 'SIGTERM');
+          try { process.kill(pid, 'SIGTERM'); } catch { /* 已退出 */ }
         }
       }
     } catch {
