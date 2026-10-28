@@ -45,6 +45,16 @@ same clip.
 
 Setup: **[docs/SETUP.md](docs/SETUP.md)** · Release notes: **[docs/RELEASE-0.3.0.md](docs/RELEASE-0.3.0.md)**
 
+## Inside a desktop pet?
+
+People have asked whether this works in [Coopanion](https://github.com/Pal-AI-Lab/Coopanion), a Cortico-based desktop pet. **Someone already built that:**
+
+[`cortico-world-video-storyboard`](https://www.npmjs.com/package/cortico-world-video-storyboard) — by huahuahuaze, based on this project. An independent implementation, and a more complete one: it downloads ffmpeg and yt-dlp on Windows, ships a settings page, splits long videos across several images, and can run local speech recognition.
+
+**We did not publish a competing extension.** Two packages doing the same thing only confuse the person installing one, and ours was only a minimal shell.
+
+If you ever need a version that *tracks upstream* instead of a copy that stops following it, `cortico/` holds a written shell that depends on this package rather than duplicating it — verified locally, deliberately unpublished. The reasoning and a side-by-side comparison live in [its README](cortico/README.md).
+
 ## Where the design came from
 
 Three instincts, each of which became a mechanism (and two of which needed the wording tightened once

@@ -33,6 +33,16 @@ video_storyboard({ input: "https://www.bilibili.com/video/BV1fq4y1u7nC" })
 
 配置见 **[docs/SETUP.zh.md](docs/SETUP.zh.md)**（装 yt-dlp、导出 cookies、五步验证、故障对照）。
 
+## 想在桌宠里用？
+
+有人问能不能装到 [Coopanion](https://github.com/Pal-AI-Lab/Coopanion)（基于 Cortico 的桌宠）。**已经有人在 npm 上做了**：
+
+[`cortico-world-video-storyboard`](https://www.npmjs.com/package/cortico-world-video-storyboard) —— 作者 huahuahuaze，思路来自这个项目。独立实现，功能比我们能提供的还全：Windows 自动下载 ffmpeg 和 yt-dlp、带配置页、长片多图分段、可选本地语音识别。
+
+**我们没有再发一个同类扩展。** 两个包做同一件事只会让装的人困惑，而且我们那版只做了最小功能。
+
+如果哪天需要"严格跟上游同步"的版本（而不是一份复制出去、不再跟随本仓库的实现），`cortico/` 目录里有一份写好的壳：它依赖本包、不复制代码，本地验证通过但**没有发布**。理由和对比写在同目录的 [README](cortico/README.md) 里。
+
 ## 设计原点（三句话，定了大半架构）
 
 | 你的直觉 | 落到代码里 |

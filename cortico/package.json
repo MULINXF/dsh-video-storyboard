@@ -1,0 +1,40 @@
+{
+  "name": "cortico-world-video-storyboard",
+  "version": "0.1.0",
+  "description": "Cortico World for Coopanion: let the desktop pet look at a video — one addressable storyboard grid with numbered cells, exact timestamps, per-cell speech and an audio envelope. NOT yet tested inside a running Coopanion; see README before installing.",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "src",
+    "describe.json",
+    "README.md"
+  ],
+  "keywords": [
+    "cortico-world",
+    "cortico",
+    "coopanion",
+    "video",
+    "storyboard",
+    "contact-sheet",
+    "ffmpeg"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "cortico": {
+    "kind": "world",
+    "api": 6,
+    "displayName": "视频分镜",
+    "describe": "describe.json"
+  },
+  "dependencies": {
+    "dsh-video-storyboard": "^0.3.1"
+  },
+  "scripts": {
+    "check": "node --check src/index.js && node --check src/world.js && node --check src/definition.js && node --check src/config.js"
+  }
+}
