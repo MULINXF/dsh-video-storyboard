@@ -15,7 +15,7 @@
 
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { access, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { access, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
@@ -546,13 +546,29 @@ export async function fetchMedia(input, opts = {}) {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
     throw new Error(explainYtdlpError(downloaded.stderr, downloaded.code));
   }
-  if (!(await exists(target))) {
-    const found = (await readdir(dir).catch(() => [])).find((n) => n.startsWith('video.'));
-    if (!found) throw new Error('yt-dlp reported success but produced no file');
-    if (found !== 'video.mp4') throw new Error(`unexpected container: ${found} (expected mp4)`);
+  // yt-dlp 有时会把 DASH 流写成 video.f100022.mp4（格式 id 进了文件名），
+  // 而不是 --merge-output-format 期望的 video.mp4。文件名不是容器判定的依据：
+  // 取目录里实际产出、最大的那个视频文件，收敛到稳定的 video.mp4 再交给管线。
+  let st = await stat(target).catch(() => null);
+  if (!st || st.size === 0) {
+    const candidates = [];
+    for (const name of await readdir(dir).catch(() => [])) {
+      if (!name.startsWith('video.') || /\.(part|ytdl|temp)$/i.test(name)) continue;
+      try {
+        const info = await stat(join(dir, name));
+        if (info.isFile() && info.size > 0) candidates.push({ path: join(dir, name), size: info.size });
+      } catch { /* 半成品被并发删除 */ }
+    }
+    if (candidates.length === 0) throw new Error('yt-dlp reported success but produced no file');
+    candidates.sort((a, b) => {
+      const amp = a.path.toLowerCase().endsWith('.mp4') ? 1 : 0;
+      const bmp = b.path.toLowerCase().endsWith('.mp4') ? 1 : 0;
+      return bmp - amp || b.size - a.size;
+    });
+    await rm(target, { force: true });
+    await rename(candidates[0].path, target);
+    st = await stat(target);
   }
-
-  const st = await stat(target);
   // 目标清晰度：请求的和实际能给的取小 —— 这正是"片源判断"要留在清单里的东西
   const zoomTarget = summary.heights.length > 0
     ? Math.min(zoomHeight, summary.maxHeight ?? zoomHeight)

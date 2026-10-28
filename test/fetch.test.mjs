@@ -185,7 +185,7 @@ if (args.includes('-J')) {
 }
 const outAt = args.indexOf('-o');
 if (outAt !== -1) {
-  const real = args[outAt + 1].replace('%(ext)s', 'mp4');
+  const real = args[outAt + 1].replace('%(ext)s', process.env.FAKE_EXT || 'mp4');
   mkdirSync(dirname(real), { recursive: true });
   writeFileSync(real, Buffer.alloc(2048, 7));
 }
@@ -229,6 +229,24 @@ test('fetchMedia: 解析 → 下载 → 第二次命中缓存', async () => {
     assert.equal(second.source.cached, true, '同一条链接第二次必须命中，否则下游缓存全部失效');
     assert.equal(second.path, first.path, '路径必须稳定');
   } finally {
+    await h.cleanup();
+  }
+});
+
+test('fetchMedia: DASH 产出 video.f100022.mp4 时收敛到 video.mp4', async () => {
+  const h = await makeHarness();
+  const prev = process.env.FAKE_EXT;
+  process.env.FAKE_EXT = 'f100022.mp4';
+  try {
+    const r = await fetchMedia('https://www.bilibili.com/video/BV1dash', {
+      ytdlp: h.ytdlp, env: h.env, cookies: h.cookies, scanHeight: 360,
+    });
+    assert.equal(r.path.endsWith('video.mp4'), true, '最终路径必须是稳定的 video.mp4');
+    assert.equal((await stat(r.path)).size, 2048);
+    assert.equal(r.source.bytes, 2048);
+    assert.ok(!(await readdir(h.media, { recursive: true })).some((n) => String(n).includes('f100022')));
+  } finally {
+    if (prev === undefined) delete process.env.FAKE_EXT; else process.env.FAKE_EXT = prev;
     await h.cleanup();
   }
 });
