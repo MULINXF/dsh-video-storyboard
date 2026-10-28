@@ -1,5 +1,28 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **The local ASR service can now be started on demand and stopped when the run ends.** Three hosts crashed
+  on 2026-10-28 because that service sat resident at ~6.8 GB of commit charge while Premiere was open.
+
+  Opt-in via `~/.dsh/asr.json`:
+
+  ```json
+  "manage": { "start": "D:/asr-local/start-asr.cmd", "idleMs": 120000, "waitMs": 180000 }
+  ```
+
+  With `manage.start` set: if the endpoint is down when a transcript is needed, it is started and awaited;
+  when the run finishes the plugin stops **the instance it started** after `idleMs` of quiet. An instance
+  someone else started is never touched — killing that would break whatever is using it.
+
+  The server also grew its own backstop: `ASR_IDLE_EXIT_S` (default 600 s, `start-asr.cmd` sets it) makes it
+  exit on its own when nothing calls it, so even a manually launched copy cannot sit there forever.
+
+  Measured end to end with the service down: one storyboard call took 42.2 s (≈35 s of model load) and came
+  back with `transcript: asr` instead of `asr-failed`.
+
 ## [0.4.1] — 2026-10-28
 
 Same story as 0.4.0, one level down: a broken thing that was invisible because it failed quietly.

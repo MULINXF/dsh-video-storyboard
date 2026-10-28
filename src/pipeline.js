@@ -6,12 +6,14 @@
  */
 
 import { writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 
 import { probeVideo, DEFAULT_FFMPEG, DEFAULT_FFPROBE } from './probe.js';
 import { resolveInput } from './fetch.js';
 import { loadTranscriptFile } from './transcript-file.js';
 import { decideCuts, scanShots, suppressClose } from './scan.js';
 import { rememberSegments } from './locate.js';
+import { ensureAsr, scheduleStop } from './asr-lifecycle.js';
 import { fitSegments, segmentsFromCuts, totalDur } from './segments.js';
 import { bestLayout, groupByCount, suggest, PLAN_THRESHOLDS } from './plan.js';
 import { findBursts, planCellRanges } from './density.js';
@@ -158,6 +160,8 @@ export async function runStoryboard(opts) {
   if (cache && !scan.cached && !precomputed) await pruneCache();
 
   // ---- 爆点细扫（见 refineBurstCuts 注释：粗扫看不见 0.35s 以下的刀）
+  // 本地 ASR 的生命周期句柄：只有"我们拉起来的"那个才会在结束时被停
+  let asrLife = null;
   let cuts = scan.cuts;
   let refinedBursts = [];
   if (refineBursts && !precomputed && !textOnly) {
@@ -216,6 +220,10 @@ export async function runStoryboard(opts) {
           input, start: winStart, end: winStart + winDur,
           threshold: `asr|${ASR_DEFAULTS.baseUrl}|${ASR_DEFAULTS.model}|${asrMaxChunk}|${transcript}`,
         });
+        // 本地 ASR 可能要临时拉起（用完就停）—— 只在 asr.json 配了 manage.start 时才托管
+        const asrCfg = resolveAsrConfig();
+        asrLife = await ensureAsr({ baseUrl: asrCfg.baseUrl, config: asrCfg, spawnImpl: spawn })
+          .catch((e) => { if (process.env.DSH_ASR_DEBUG) console.error('[asr-lifecycle]', e.message); return null; });
         const asr = await withCache(asrKey, () => transcribeLong({
           input, ffmpegPath, start: winStart, end: winStart + winDur,
           silences, maxChunk: asrMaxChunk,
@@ -467,6 +475,10 @@ export async function runStoryboard(opts) {
   await remember(info, {
     from: winStart, to: winStart + winDur, cells: cellRanges.length, cuts: cuts.length,
   }).catch(() => {});
+
+  // 本次运行结束：如果是我们拉起的本地 ASR，安排它空闲后自动退出
+  // （own 的才停 —— 别人启动的实例无权杀，杀了会打断正在用它的任务）
+  if (asrLife?.owned) scheduleStop({ owned: true, config: resolveAsrConfig() });
 
   return {
     info,

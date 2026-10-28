@@ -86,6 +86,8 @@ export function resolveAsrConfig(env = process.env) {
     source: fromEnv ? 'env' : (file.baseUrl || file.key ? 'file' : 'default'),
     // 术语校正表：错误写法 → 正确写法
     terms: file.terms && typeof file.terms === 'object' ? file.terms : undefined,
+    // 生命周期托管：{ start, stop?, idleMs?, waitMs? } —— 见 asr-lifecycle.js
+    manage: file.manage && typeof file.manage === 'object' ? file.manage : undefined,
     ...(file.path ? { configPath: file.path } : {}),
   };
 }
