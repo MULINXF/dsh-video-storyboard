@@ -12,7 +12,6 @@ import { decideCuts, scanShots, suppressClose } from './scan.js';
 import { fitSegments, segmentsFromCuts, totalDur } from './segments.js';
 import { bestLayout, groupByCount, suggest, PLAN_THRESHOLDS } from './plan.js';
 import { findBursts, planCellRanges } from './density.js';
-import { analyseStack, isFlicker } from './flicker.js';
 import { describeMemory, remember } from './memory.js';
 import { analyzeAudio, describeAudio, detectOnsets } from './audio.js';
 import {
@@ -24,7 +23,7 @@ import { ffmpegVersion, sha256File } from './provenance.js';
 import { findInjection } from './injection.js';
 import {
   addAudioStrip, composeSheet, encodeRaw, encodePngBuffer, extractFrameRaw, extractSharpest, layoutCanvas,
-  markStackedCell, tileSubFrames,
+  tileSubFrames,
 } from './sheet.js';
 
 export const PICK_MODES = ['sharp', 'mid', 'thumb'];// 只有两种：时间码不烧进画面 —— 它占像素、压缩后先糊，而清单里已经有 0.01 秒精度的时间。
@@ -87,8 +86,6 @@ export async function runStoryboard(opts) {
     // 快闪素材要把这个调小才数得出镜头数，否则 3 秒 18 镜会被压成 4 刀。
     scanGap = 0.35,
     refineBursts = true,
-    // 默认关：阈值只在两支素材上量过，概念 PV 上会误判两格。等更多素材验证后再打开
-    flickerStack = false,
     adaptive = true,
     pick = 'sharp',
     burn = 'index',
@@ -400,7 +397,6 @@ export async function runStoryboard(opts) {
     // 摊格子要额外取 k²−1 帧（4×4 就是 15 次 ffmpeg）。整张图最多多取 32 帧，
     // 否则一支全是快闪的片子会变成"每格取 16 张"，渲染时间翻十几倍。
     let subBudget = 32;
-    let stackBudget = 2;      // 堆叠一格要 12+16 次取帧，一张图最多堆两格
     for (const [gi, { from: a, to: b }] of group.entries()) {
       index += 1;
       // 这一格里切了几刀 —— 快闪蒙太奇的"速度"就是这个数字，模型不用自己数刻度
@@ -409,58 +405,6 @@ export async function runStoryboard(opts) {
       const cutScore = cellCuts > 0
         ? cellCutList.reduce((n, c) => n + (c.score ?? 0), 0) / cellCuts
         : Infinity;
-      // ---- 闪烁蒙版：快切格里再判一次"这是不是叠了一层在闪的东西"
-      // 判据是 flickerRatio（反复翻转的像素比例），不是 coreRatio —— 见 flicker.js 里的实测表
-      let stacked = 0;
-      // 探测成本 = 探测窗口数 × 12 次取帧。一个 33 秒的格子按 0.5 秒滑窗会变成 66 个窗口、
-      // 792 次 ffmpeg —— 实测直接卡死。所以：只探"确实有刀"的格子，且每格最多 3 个窗口。
-      if (flickerStack && stackBudget > 0 && cellCuts >= 2) {
-        // **按 1 秒滑窗探测，不是整格一次**：闪烁常常只占格子里的某一秒，
-        // 整格一起采样会把它和旁边的正常画面平均掉（实测 209-210 单独测 0.74，摊进 2.2 秒的格子只剩 0.02）。
-        const span = b - a;
-        const maxProbes = 3;
-        const winSec = Math.min(1, span);
-        const step = Math.max(winSec / 2, (span - winSec) / Math.max(1, maxProbes - 1));
-        let hit = false;
-        for (let k = 0; k < maxProbes && !hit; k += 1) {
-          const w = Math.min(span - winSec, k * step);
-          const probeFrames = [];
-          for (let i = 0; i < 12; i++) {
-            const at = a + w + winSec * ((i + 0.5) / 12);
-            probeFrames.push((await extractFrameRaw({
-              input: remoteFrame?.url ?? input, at, dur: 0, cellW: 96, cellH: 54,
-              ffmpegPath, http: remoteFrame ? { headers: remoteFrame.headers } : undefined, mode: 'mid',
-            })).buffer);
-          }
-          const ps = analyseStack(probeFrames);
-          if (isFlicker(ps)) hit = +ps.flickerRatio;
-        }
-        if (hit) {
-          const stackFrames = [];
-          for (let i = 0; i < 16; i++) {
-            const at = a + (b - a) * ((i + 0.5) / 16);
-            stackFrames.push((await extractFrameRaw({
-              input: remoteFrame?.url ?? input, at, dur: 0, cellW, cellH,
-              ffmpegPath, http: remoteFrame ? { headers: remoteFrame.headers } : undefined, mode: 'mid',
-            })).buffer);
-          }
-          const st = analyseStack(stackFrames);
-          markStackedCell(st.median, cellW, cellH);
-          stacked = stackFrames.length;
-          stackBudget -= 1;
-          frames.push({ buffer: st.median, index });
-          const textS = aligned[gi] ?? null;
-          cellMeta.push({
-            i: index, sheet: si + 1, t_start: +a.toFixed(3), t_end: +b.toFixed(3),
-            t_frame: +(a + (b - a) / 2).toFixed(3),
-            ...(cellCuts > 0 ? { cuts: cellCuts } : {}),
-            stack: stacked,
-            ...(textS?.text ? { text: textS.text, charsPerSec: textS.charsPerSec } : {}),
-          });
-          continue;
-        }
-      }
-
       let sub = chooseSubGrid({ shots: cellCuts + 1, cellW, cellH, dur: b - a, cutScore });
       while (sub > 1 && sub * sub - 1 > subBudget) sub -= 1;   // 预算不够就降档，降不下去就整格
       if (sub > 1) subBudget -= sub * sub - 1;
@@ -1059,9 +1003,7 @@ export function formatManifest(result, {
       (showFrame ? ` frame@${tc(c.t_frame)}` : '') +
       (c.cuts ? `  cuts ${c.cuts}` : '') +
       // 被摊开的格子要说清里面有几张：否则模型会以为那是一整张画面
-      (c.sub ? `  ${c.sub * c.sub} frames (${c.sub}×${c.sub})` : '') +
-      // 堆叠格必须写清楚：画面干净得不像原来那样，不说明模型会去描述一个不存在的画面
-      (c.stack ? `  stacked ${c.stack} frames, flicker removed` : '');
+      (c.sub ? `  ${c.sub * c.sub} frames (${c.sub}×${c.sub})` : '');
     const body = text ? `${head}\n    "${text}"` : head;
     if (used + body.length + 1 > maxChars) { stoppedAt = c.i - 1; break; }
     lines.push(body);
