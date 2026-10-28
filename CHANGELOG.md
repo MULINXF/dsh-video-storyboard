@@ -1,6 +1,17 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.1] — 2026-10-28
+
+Same story as 0.4.0, one level down: a broken thing that was invisible because it failed quietly.
+
+### Fixed
+
+- **A downloaded copy with no audio track said "no audio in the source".** On an anonymous Bilibili URL the
+  lowest track is video-only, so the whole audio path went silent — `transcript=no-audio`, empty envelope,
+  `meanLufs=null` — and the manifest implied the video itself had no sound. It now probes the downloaded file,
+  compares it with the formats the source advertised, and says which of the two it is:
+  *"no audio in this copy: the downloaded track is silent while the source has audio. Pass cookies, or download
+  locally"*. Reported by @xingyueDanYang with a reproduction.
 
 ### Added
 

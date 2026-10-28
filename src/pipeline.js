@@ -1102,7 +1102,13 @@ export function formatManifest(result, {
     lines.push('transcript: ASR ran and found no speech here — treat this as a video with no dialogue ' +
       '(this is different from a subtitle-track failure). Read the pictures and the audio strip.');
   }
-  if (result.transcript?.source === 'no-audio') lines.push('no audio track: grid is visual only');
+  if (result.transcript?.source === 'no-audio') {
+    // 区分"源本来没声音"和"这次下载的副本没声音" —— 后者能修（换成带 cookies 或本地文件）
+    lines.push(result.source?.audioMissing
+      ? 'no audio in this copy: the downloaded track is silent while the source has audio. ' +
+        'Pass cookies, or download locally, to get loudness and transcript.'
+      : 'no audio track: grid is visual only');
+  }
   lines.push(`total ${picked.length} of ${total} cells shown` +
     (hasSheets ? '; unlabeled cells are padding, not content.' : '.'));
   lines.push('</storyboard>');

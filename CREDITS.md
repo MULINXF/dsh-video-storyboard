@@ -12,10 +12,13 @@
 
 | 项目 | 许可 | 我们参考了什么 |
 |---|---|---|
-| [dsh-video-see](https://github.com/HongtaoWang75/dsh-video-see) | MIT | 工具注册与宿主契约的形状；"先检查模型模态再解码"的顺序；旋转/竖屏/末尾边界的处理**问题清单**（实现为独立编写） |
-| [dsh-video-lens](https://github.com/dundunhan/dsh-video-lens) | MIT | "ASR 失败不阻塞主流程"的降级策略；按时间窗重采样的问答思路 |
+| [dsh-video-see](https://github.com/HongtaoWang75/dsh-video-see) | MIT | 工具注册与宿主契约的形状；"先检查模型模态再解码"的顺序；旋转/竖屏/末尾边界的处理**问题清单**（实现为独立编写）。它反过来主张"别为了省帧数牺牲清晰度"，README 的对比段直接引用了它自己算的 20 帧 ≈ 7,680 token |
+| [dsh-video-lens](https://github.com/dundunhan/dsh-video-lens) | MIT | "ASR 失败不阻塞主流程"的降级策略；`video_ask` 的**时间锚定问答**思路（我们落成了纯文本的 `video_locate`，不调外部 VLM） |
+| [watch-skill / DeepWatch](https://github.com/oxbshw/watch-skill) | MIT | "**索引一次、追问免费**"的产品形态；"答案要能被另一个东西复核"这条（我们落成了 `.evidence.json` 的雏形） |
 | [PySceneDetect](https://github.com/Breakthrough/PySceneDetect) | BSD-3-Clause | ContentDetector 的**加权打分思想**（HSV 三通道差异），`scan.js` 为独立实现，未参考其代码 |
 | [TransNet V2](https://github.com/soCzech/TransNetV2) | MIT | 可选后端的选型依据；本仓库不分发其代码与权重 |
+
+> 以上四家的想法我们都只**取判断、不取代码**（MIT 允许复制，但这个项目不这么做）。README 里有和它们的逐项对比，包括我们明确输在哪。
 
 感谢以上作者。以上致谢不构成任何形式的背书，也未暗示原作者对本项目的认可。
 

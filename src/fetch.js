@@ -20,6 +20,8 @@ import { constants } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 
+import { probeVideo } from './probe.js';
+
 export const COOKIES_ENV = 'DSH_VIDEO_COOKIES';
 export const MEDIA_ENV = 'DSH_VIDEO_MEDIA_DIR';
 export const MEDIA_MAX_MB_ENV = 'DSH_VIDEO_MEDIA_MAX_MB';
@@ -600,8 +602,16 @@ export async function fetchMedia(input, opts = {}) {
     ? Math.min(zoomHeight, summary.maxHeight ?? zoomHeight)
     : zoomHeight;
 
+  // 匿名/低档位拿到的副本可能**没有音轨**（B 站最低档只有画面），
+  // 于是整条音频链沉默（transcript=no-audio、meanLufs=null），用户以为是插件坏了。
+  // 这里明确区分"源本来就没声音"和"这次下载的副本没声音"（xingyueDanYang 报的观察）。
+  const sourceHasAudio = (summary.formats ?? []).some((f) => f.acodec && f.acodec !== 'none');
+  const localInfo = await probeVideo(target).catch(() => null);
+  const audioMissing = Boolean(localInfo && !localInfo.hasAudio && sourceHasAudio);
+
   const source = {
     kind: 'url',
+    ...(audioMissing ? { audioMissing: true } : {}),
     url,
     cached: false,
     bytes: st.size,
