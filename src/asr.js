@@ -63,6 +63,16 @@ function readConfigFile(env) {
  * `ERR_INVALID_URL: Invalid URL`。这种错误看起来像"配置没生效"，其实是配置生效了但值坏了一点点。
  * 所以读 env 时统一剥掉首尾成对的引号与空白。
  */
+/** baseUrl 指向本机时，ASR 不需要 key */
+export function isLoopback(baseUrl) {
+  try {
+    const h = new URL(String(baseUrl)).hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    return h === '127.0.0.1' || h === 'localhost' || h === '::1' || h === '0.0.0.0';
+  } catch {
+    return false;
+  }
+}
+
 export function cleanEnvValue(v) {
   if (typeof v !== 'string') return v;
   const t = v.trim();
@@ -157,7 +167,11 @@ export async function transcribe({
   const key = apiKey === undefined
     ? cleanEnvValue(process.env[ASR_DEFAULTS.keyEnv]) || ASR_DEFAULTS.fileKey
     : apiKey;
-  if (!key) return null;                           // 没配就跳过，不报错
+  // **本机服务不该强制要 key**：自己跑的 FunASR / whisper.cpp / faster-whisper 服务
+  // 通常不校验 Authorization，逼用户填一个假 key 只会让"能不能用"取决于文档写没写清。
+  // 云端才必须 key（没有它必然 401）。
+  const local = isLoopback(baseUrl);
+  if (!key && !local) return null;                 // 云端没配 key：跳过，不报错
 
   // 抽成 16k 单声道 wav（16k 是 ASR 的通用采样率，体积也可控）
   const args = [ffmpegPath, '-hide_banner', '-v', 'error', '-nostdin'];
@@ -177,7 +191,7 @@ export async function transcribe({
 
   const res = await fetch(`${baseUrl.replace(/\/$/, '')}/audio/transcriptions`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${key}` },
+    headers: key ? { Authorization: `Bearer ${key}` } : {},
     body: form,
     signal: AbortSignal.timeout(timeoutMs),
   });

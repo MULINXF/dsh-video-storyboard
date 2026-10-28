@@ -14,6 +14,7 @@
 
 import { DETAIL_CHARS, runStoryboard, formatManifest, formatProbe, formatRemoteProbe } from './pipeline.js';
 import { probeVideo } from './probe.js';
+import { formatMatches, matchSegments, recallSegments } from './locate.js';
 import { isHttpUrl, probeUrl, resolveDirectUrl, resolveInput } from './fetch.js';
 import {
   storyboardToolSpec, zoomToolSpec, probeToolSpec, locateToolSpec, validateToolArgs, validateZoomArgs,

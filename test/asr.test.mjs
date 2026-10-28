@@ -1,14 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import {
+import { isLoopback,
   alignCells, CELL_BREAK_GAP, chunkWindows, mergeSegments, shortStamp, transcribeLong,
 } from '../src/asr.js';
 
 /* ---------------------------------------------------------------- 空结果的诚实度 */
 
 test('transcribeLong: 没配 key 时返回 null（而不是空壳对象）', async () => {
-  const long = await transcribeLong({ input: 'nope.mp4', start: 0, end: 300, apiKey: null });
+  const long = await transcribeLong({
+    input: 'nope.mp4', start: 0, end: 300, apiKey: null, baseUrl: 'https://api.example.com/v1',
+  });
   assert.equal(long, null, '多窗口、每段都拿不到 key → 整段应该是 null');
 });
 
@@ -106,4 +108,12 @@ test('alignCells: 没有台词命中时，text 为空且 broken 不为真', () =
   assert.equal(cell.text, '');
   assert.equal(cell.broken, false);
   assert.deepEqual(cell.lines, []);
+});
+
+test('isLoopback: 本机服务不需要 key', () => {
+  assert.equal(isLoopback('http://127.0.0.1:8000/v1'), true);
+  assert.equal(isLoopback('http://localhost:8000/v1'), true);
+  assert.equal(isLoopback('http://[::1]:8000/v1'), true);
+  assert.equal(isLoopback('https://api.siliconflow.cn/v1'), false);
+  assert.equal(isLoopback('not a url'), false);
 });

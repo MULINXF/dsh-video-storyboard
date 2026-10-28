@@ -124,10 +124,19 @@ test('ASR 客户端：服务端 4xx 时要抛错（便于上层标 asr-failed）
   );
 });
 
-test('ASR 客户端：没配 key 时直接返回 null，不发请求', async () => {
-  // 显式传 null 才是"不要 key"；undefined 会回落到 env / $DSH_HOME/asr.json
-  const result = await transcribe({ input: 'whatever.mp4', apiKey: null });
+test('ASR 客户端：云端没配 key → 直接返回 null，不发请求', async () => {
+  // 云端必须 key（没有必然 401）。本机服务不在此列 —— 见下一条。
+  const result = await transcribe({ input: 'whatever.mp4', baseUrl: 'https://api.example.com/v1', apiKey: null });
   assert.equal(result, null);
+});
+
+test('ASR 客户端：本机服务没配 key 也会真的去请求（不要求假 key）', async () => {
+  // 自己跑的 FunASR 不校验 Authorization；逼用户填 key 只会让"能不能用"取决于文档
+  await assert.rejects(
+    () => transcribe({ input: 'whatever.mp4', baseUrl: 'http://127.0.0.1:9/v1', apiKey: null }),
+    /./,
+    '应该尝试连接（然后失败），而不是提前 return null',
+  );
 });
 
 

@@ -1,6 +1,30 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.2] — 2026-10-28
+
+0.4.1 shipped a broken tool and a key requirement nobody could justify. Both reported within an hour.
+
+### Fixed
+
+- **`video_locate` crashed on every call** in 0.4.1: `src/index.js` used `recallSegments` / `matchSegments` /
+  `formatMatches` without importing `./locate.js`, so the tool threw `ReferenceError` the moment it ran.
+  The registration test exercised storyboard and zoom but never locate — it does now, and that is the guard
+  for this exact class of mistake. Reported by @盲目吃鱼豹豹 with the one-line patch.
+
+- **A local ASR service no longer needs a `key`.** Any transcription without a key was skipped outright, so
+  self-hosted FunASR users were told "configure a key to actually listen" while their service was running fine
+  two ports away. Loopback base URLs (`127.0.0.1` / `localhost` / `[::1]`) now send no `Authorization` header
+  and are not gated on a key. Cloud endpoints still require one — without it we skip rather than 401.
+  Reported by @小观棋.
+
+### Docs
+
+- New README section on subtitles and ASR: which models we actually use (`paraformer-zh` + `fsmn-vad` +
+  `ct-punc` locally, `FunAudioLLM/SenseVoiceSmall` by default in the cloud), three ways to configure it
+  (local service / any OpenAI-compatible cloud / a finished SRT), the `/health` + `/shutdown` contract a
+  self-hosted server must honour, and the env vars.
+
+## [0.4.1] — 2026-10-28
 
 ### Added
 

@@ -193,6 +193,13 @@ test('插件接线: apply() 注册一个叫 video_storyboard 的工具', async (
     assert.match(value.text, /<storyboard[\s\S]*cell 1/);
     assert.equal(value.images.length, 1);
 
+    // locate 也要真跑一次：这条测试就是 issue 里那个 ReferenceError 的回归守卫
+    // （0.4.1 漏了 `import ... from './locate.js'`，工具一调就崩，而测试当时没覆盖到）
+    const locate = registered.find((t) => t.name === 'video_locate');
+    const lv = await locate.execute({ input: fixture, query: '测试' });
+    assert.equal(typeof lv.text, 'string');
+    assert.ok(lv.text.length > 10, 'locate 必须返回一段可读文本');
+
     // zoom 也要真跑一次：窗口收窄、单图、格数默认 6
     saved.length = 0;
     const zoom = registered.find((t) => t.name === 'video_zoom');

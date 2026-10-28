@@ -17,7 +17,7 @@
 
 模型得到的是"这 90 秒里发生了什么、大概在第几秒"，需要细节时再用 `video_zoom` 放大某一段。
 
-## 三个工具
+## 四个工具
 
 | 工具 | 干什么 | 何时用 |
 |---|---|---|
@@ -124,6 +124,110 @@ cell 3 (r1c3) = 00:33.29-00:47.08  cuts 10  16 frames (4×4)
 | 90 秒片子端到端 | 约 10 秒（含解码、扫描、取帧、拼图） |
 | 快闪重判 | 零额外解码（复用逐帧分数） |
 | 切点召回 | 概念 PV 44 刀 / 混剪 178 刀（151 秒）/ 口播 125 刀 |
+
+## 字幕与 ASR（怎么让它"听懂"）
+
+转写是**可选**的：不配也能出图，只是清单里没有台词。
+
+### 优先级（第一个能用的赢）
+
+1. **视频自带字幕轨** → 直接读，不跑 ASR
+2. **`transcriptFile`** → 喂已有的 SRT/JSON，完全不碰 ASR
+3. **ASR 服务** → 上面两个都没有时才用
+
+### 我们用的是哪个模型
+
+| 场景 | 模型 | 说明 |
+|---|---|---|
+| **本机** | FunASR **`paraformer-zh`** + **`fsmn-vad`** + **`ct-punc`** | 中文、带标点、CPU 可跑；三个模型一起约 6.8 GB 提交额 |
+| **云端默认** | SiliconFlow **`FunAudioLLM/SenseVoiceSmall`** | 自带标点、多语种，按量计费 |
+
+`model` 字段可以改成任何 OpenAI 兼容转写接口认的模型名（`whisper-1`、`whisper-large-v3`、`paraformer-zh` …）。
+
+### 配置 A：本机服务（免费、不联网）
+
+`~/.dsh/asr.json`：
+
+```json
+{
+  "baseUrl": "http://127.0.0.1:8000/v1",
+  "model": "paraformer-zh",
+  "language": "zh",
+  "manage": {
+    "start": "D:/asr-local/start-asr.cmd",
+    "idleMs": 120000,
+    "waitMs": 180000
+  }
+}
+```
+
+- **本机地址不需要 `key`**（`127.0.0.1` / `localhost` / `[::1]`）。自己跑的服务一般不校验 Authorization，插件不会再逼你填一个假 key。
+- `manage` 是生命周期托管：调用时端点不通就拉起，运行结束空闲 `idleMs` 后请它自己退出（走服务的 `POST /shutdown`）。
+- 冷启动 **30 秒**（模型加载），之后每次调用不再等。
+
+服务端要满足两个约定：
+
+```
+GET  /health        → 200 即可（拿不到就读 /v1/models）
+POST /shutdown      → 返回后退出（不支持也行，插件会退回杀进程）
+POST /v1/audio/transcriptions   → OpenAI 兼容，返回 verbose_json
+```
+
+### 配置 B：云端服务（有 key 就行，任何 OpenAI 兼容）
+
+```json
+{
+  "baseUrl": "https://api.siliconflow.cn/v1",
+  "key": "sk-...",
+  "model": "FunAudioLLM/SenseVoiceSmall",
+  "language": "zh"
+}
+```
+
+换成 OpenAI：
+
+```json
+{ "baseUrl": "https://api.openai.com/v1", "key": "sk-...", "model": "whisper-1" }
+```
+
+便宜的选择（自己按需改）：
+
+| 服务 | baseUrl | model 示例 |
+|---|---|---|
+| SiliconFlow | `https://api.siliconflow.cn/v1` | `FunAudioLLM/SenseVoiceSmall` |
+| OpenAI | `https://api.openai.com/v1` | `whisper-1` |
+| 阿里云百炼 | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `paraformer-v2` |
+| Groq | `https://api.groq.com/openai/v1` | `whisper-large-v3-turbo` |
+
+**云端不填 key 会直接跳过 ASR**（不会报错，清单写 `transcript: none`）。
+
+### 配置 C：直接用现成字幕
+
+```js
+video_storyboard({ input: "film.mp4", transcriptFile: "film.srt" })
+```
+
+支持 SRT / VTT / JSON（`[{ "start": 1.2, "end": 3.4, "text": "..." }]`）。这条路**零 ASR 成本**，也最准——
+平台自带的字幕比任何识别都可靠。
+
+### 环境变量（优先级高于文件）
+
+```
+DSH_ASR_BASE_URL   DSH_ASR_MODEL   DSH_ASR_LANG
+DSH_ASR_KEY        DSH_ASR_KEY_ENV
+```
+
+> 桌面版 DSH 的进程环境由启动器决定，`setx` 设的变量宿主读不到 —— **优先用 `asr.json`**。
+
+### 术语校正
+
+识别结果里的固定错字可以确定性替换（不进模型）：
+
+```json
+"terms": { "绘插": "彗差", "星尘边境": "Stardust Frontier" }
+```
+
+替换次数会报在清单里（`termsFixed N`），不静默。
 
 ## 和同类插件比（诚实的版本）
 
