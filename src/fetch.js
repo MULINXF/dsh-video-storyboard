@@ -350,8 +350,11 @@ export function unwrapSingle(info, url) {
 /** 选出"能覆盖到 h 的最省参数"的格式串。B 站是 DASH，所以必须是 bv*+ba。 */
 export function formatSelector(height, { withAudio = true } = {}) {
   const cap = Number.isFinite(height) && height > 0 ? `[height<=${Math.round(height)}]` : '';
-  if (!withAudio) return `bv*${cap}/b${cap}`;
-  return `bv*${cap}+ba/b${cap}`;
+  // **末尾必须留一个不带筛选的兜底**。竖屏视频在 yt-dlp 里是 360x640 / 480x852 ——
+  // `height` 是长边，`height<=480` 一个都匹配不到，整条链路直接报
+  // "Requested format is not available"（实测 BV1BjxM69EHh 就是这样挂的）。
+  if (!withAudio) return `bv*${cap}/b${cap}/bv*/b`;
+  return `bv*${cap}+ba/b${cap}/bv*+ba/b`;
 }
 
 /* ------------------------------------------------------------------ 媒体缓存 */
@@ -541,6 +544,8 @@ export async function fetchMedia(input, opts = {}) {
   onProgress?.({ phase: 'download', height: wantHeight });
   const dlArgs = [
     '-f', formatSelector(scanHeight),
+    // 按"短边"就近取：竖屏视频的 res 是宽（360/480/720），不是 height。
+    ...(Number.isFinite(scanHeight) && scanHeight > 0 ? ['-S', `res:${Math.round(scanHeight)}`] : []),
     '--no-warnings', '--no-playlist', '--no-progress',
     '--merge-output-format', 'mp4',
     '-o', join(dir, 'video.%(ext)s'),

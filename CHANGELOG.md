@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- **Vertical Bilibili videos could not be downloaded at all.** yt-dlp reports a 9:16 video's formats as
+  360x640 / 480x852 / 720x1280, so `height` is the *long* edge and `bv*[height<=480]+ba/b[height<=480]`
+  matched nothing: every request ended in `Requested format is not available`. The selector now ends with an
+  unfiltered fallback (`.../bv*+ba/b`) and sorts by `res:` (yt-dlp's short-edge metric), so a portrait video
+  picks 480x852 instead of failing. Found by running the cross-domain test set (BV1BjxM69EHh).
+
 - **A cut-on-every-frame edit was counted as 9 shots when there were 23 — and could be dismissed as camera
   motion.** Two causes: the one-frame gap was `1.02 / fps`, i.e. *longer* than a frame, so adjacent frames
   merged; and `degraded: 'motion'` fired on any window with a short median shot and many high-scoring frames,
