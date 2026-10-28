@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   assessDegraded, autoThreshold, decideCuts, DEFAULT_THRESHOLD, frameToHsv, quantile, rgbToHsv,
-  scanSummary, scorePair,
+  scanSummary, scorePair, spikeCuts,
   suppressClose, SCAN_W,
 } from '../src/scan.js';
 
@@ -207,4 +207,27 @@ test('decideCuts: auto-low 用本段自己的低分位，不会被全片平均�
   const r = decideCuts(flat, { threshold: 'auto-low', minGap: 1.02 / 25, duration: 1.6 });
   // 全段同分：阈值取到同分本身，严格大于挡掉整簇 —— 不该报出一堆假刀
   assert.ok(r.cuts.length <= 1, `同分帧不该整簇进来，实得 ${r.cuts.length}`);
+});
+
+/* ---------------------------------------------------------------- 相对基线找切 */
+
+test('spikeCuts: PPT 型（基线接近 0，小改动也要抓到）', () => {
+  // 平时 0.3，第 50 帧出现一个 6 分的改动 —— 固定阈值 15 会漏掉，相对基线是 20 倍
+  const stats = Array.from({ length: 100 }, (_, i) => ({ t: i / 12, score: i === 50 ? 6 : 0.3 }));
+  const cuts = spikeCuts(stats, { k: 3, minAbs: 1 });
+  assert.equal(cuts.length, 1);
+  assert.equal(cuts[0].t, 50 / 12);
+  assert.ok(cuts[0].ratio >= 10, `相对基线倍数应很大，实得 ${cuts[0].ratio}`);
+});
+
+test('spikeCuts: 匀速运镜（基线高但平稳）不该报刀', () => {
+  const stats = Array.from({ length: 100 }, (_, i) => ({ t: i / 12, score: 20 + (i % 3) * 0.4 }));
+  assert.equal(spikeCuts(stats, { k: 3, minAbs: 6 }).length, 0);
+});
+
+test('spikeCuts: 运镜里插一刀仍然能挑出来', () => {
+  const stats = Array.from({ length: 100 }, (_, i) => ({ t: i / 12, score: i === 40 ? 70 : 20 }));
+  const cuts = spikeCuts(stats, { k: 3, minAbs: 6 });
+  assert.equal(cuts.length, 1);
+  assert.equal(cuts[0].t, 40 / 12);
 });

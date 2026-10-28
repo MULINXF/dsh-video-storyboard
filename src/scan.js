@@ -90,6 +90,45 @@ export function scorePair(prev, cur) {
   return sum / ((cur.length / 3) * totalWeight);
 }
 
+/**
+ * 按"相对本地基线"找切点：分数（= 相邻两帧的画面变化百分比）突然**比它附近的常态高很多**才算一刀。
+ *
+ * 为什么需要它：固定阈值对两种内容无解 ——
+ *  - PPT/网课：平时变化 0.6，换页瞬间 40。固定阈值 15 能抓到换页，但"只多出一个要点"这种
+ *    小改动只有 5，被阈值挡掉；而 5 其实是基线（0.6）的 8 倍。
+ *  - 匀速运镜/长镜头：每帧都在变，基线本身就有 20，固定阈值要么全放过要么全挡掉；
+ *    真要在这段里找剪辑，只能看"比这段自己的常态高多少"。
+ *
+ * 所以判据从"分数 > 15"改成"分数 > max(绝对下限, k × 本地中位数)"。
+ * 返回的每一刀都带 ratio（相对基线的倍数），可以用来说明"这一刀有多确信"。
+ *
+ * @param {Array<{t:number, score:number}>} stats 逐帧分数
+ * @param {{k?:number, minAbs?:number, halfWindow?:number}} opts
+ * @returns {Array<{t:number, score:number, ratio:number}>}
+ */
+export function spikeCuts(stats, { k = 3, minAbs = 6, halfWindow = 15 } = {}) {
+  if (!Array.isArray(stats) || stats.length < 3) return [];
+  const scores = stats.map((s) => s.score);
+  const sorted = [...scores].sort((a, b) => a - b);
+  const q = (p) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.floor(sorted.length * p)))];
+  // 基线取"本地中位数"和"全片中位数"里更小的那个：本地安静就用本地，
+  // 本地本来就很吵（运镜）就退回全片，避免把运镜的常态当成基线而漏掉真正的剪切。
+  const global = q(0.5);
+  const out = [];
+  for (let i = 0; i < stats.length; i++) {
+    const lo = Math.max(0, i - halfWindow);
+    const hi = Math.min(stats.length, i + halfWindow + 1);
+    const around = scores.slice(lo, hi).slice(0, i - lo).concat(scores.slice(i - lo + 1, hi - lo));
+    const local = around.length ? around.sort((a, b) => a - b)[Math.floor(around.length / 2)] : global;
+    const base = Math.max(0.2, Math.min(local, global));
+    const need = Math.max(minAbs, base * k);
+    if (scores[i] > need) {
+      out.push({ ...stats[i], ratio: +(scores[i] / base).toFixed(1) });
+    }
+  }
+  return out;
+}
+
 /** 抑制过密切点：同窗口内只保留分数最高的那个 */
 export function suppressClose(cuts, minGap = 0.35) {
   const sorted = [...cuts].sort((a, b) => a.t - b.t);
