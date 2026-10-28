@@ -52,9 +52,9 @@
 | 贡献者 | 内容 | 落地 |
 |---|---|---|
 | [@dugu951](https://github.com/dugu951) | 指出"没配 ASR 后端时长视频仍自称 `transcript=\"asr\"`"，并给出修复 | PR #3，合并于 `22546db`；合并后补了单窗口分支与"没跑"vs"跑了没结果"的区分 |
-| [@ggfgfgf-on](https://github.com/ggfgfgf-on) | [issue #1](https://github.com/SAOS-3624/dsh-video-storyboard/issues/1) 的 10 条诊断（色相非环形、低饱和假切点、<0.4s 崩溃、`index+time` 未实现、VFR/SAR 等） | 其中 4 条已在主线以重写形式落地：`819b8d2`、`04d318a`、`018b7ea`、`38df7a0`；PR #2 以 `7b6451d` 记录（该分支基于 `f3b7ce4`，冲突无法直接合，采用"接受贡献、保留我方实现"的合并） |
-| [@canyueY](https://github.com/canyueY) | V2 结构调整、可选富化侧车（说话人分离/远程镜头检测）、`video_zoom.mode` 的提出 | 讨论中，分支开发中；本项目已先行吸收 `fast cuts`（爆点与镜头数）与 `seen before`（`src/memory.js` 记忆层） |
-| [@xingyueDanYang](https://github.com/xingyueDanYang) | [issue #4](https://github.com/SAOS-3624/dsh-video-storyboard/issues/4) 的 5 条接入建议（转写层接受已有 JSON/SRT 或命令、ffmpeg 发现路径等） | 待评估 |
+| [@ggfgfgf-on](https://github.com/ggfgfgf-on) | [issue #1](https://github.com/SAOS-3624/dsh-video-storyboard/issues/1) 的 10 条诊断（色相非环形、低饱和假切点、<0.4s 崩溃、`index+time` 未实现、VFR/SAR 等）；[PR #7](https://github.com/SAOS-3624/dsh-video-storyboard/pull/7) 的 ffmpeg/ffprobe 宿主目录发现、manifest provenance（`cell`/`tokens`/`ffmpeg`/可选 `sha256`）、以及 `transcriptFile` + `from/to` 时 chars 窗口口径的修复 | issue #1 中 4 条以重写形式落地（`819b8d2`、`04d318a`、`018b7ea`、`38df7a0`）；PR #7 **完整合入**（`0a0e96f`），代码由他编写 |
+| [@canyueY](https://github.com/canyueY) | 结构调整方向（analyze/plan/render 拆分）、可选富化侧车（说话人分离、远程镜头检测）、`video_zoom.mode`、抽样扫描（`scan-sampled`）与感知哈希（`fingerprints`）的提出 | 已吸收 `fast cuts`（爆点与镜头数）与 `seen before`（`src/memory.js`）。[PR #6](https://github.com/SAOS-3624/dsh-video-storyboard/pull/6) 未整体合入——实测拆分为三个模块会让清单 +49%、热路径慢 2.3×，收益是结构好看，对"模型能不能看懂"没有帮助。其中的 `extras/dsh-video-enrichment/` 是独立 Python 侧车，不污染主包，欢迎单独提 PR |
+| [@xingyueDanYang](https://github.com/xingyueDanYang) | [issue #4](https://github.com/SAOS-3624/dsh-video-storyboard/issues/4) 的 5 条接入建议（转写层接受已有 JSON/SRT、ffmpeg 宿主发现、阈值可配置化、成本口径显式、cell 引用契约） | 第 1 条 `transcriptFile` 已在 0.3.0 独立实现；第 2 条与第 3 条的"记录本次生效阈值"已在 0.3.1 通过 PR #7 落地；第 4 条的 `cell="WxH"` + `tokens="… (DSH estimate)"` 已落地；第 5 条的 `ffmpeg` 版本与可选 `sha256` 已落地，`cellId` 暂不做 |
 
 > 这份表只记"提出并推动了什么"，不区分代码是否被逐行采用——诊断、复现和反例同样计入。
 
