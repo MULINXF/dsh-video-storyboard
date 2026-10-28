@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  assessDegraded, autoThreshold, DEFAULT_THRESHOLD, frameToHsv, quantile, rgbToHsv, scanSummary, scorePair,
+  assessDegraded, autoThreshold, decideCuts, DEFAULT_THRESHOLD, frameToHsv, quantile, rgbToHsv,
+  scanSummary, scorePair,
   suppressClose, SCAN_W,
 } from '../src/scan.js';
 
@@ -190,4 +191,20 @@ test('quantile: 取低分位用于"这片就是很快"的阈值', () => {
   assert.equal(quantile(scores, 0.10), 26);
   assert.equal(quantile(scores, 0.50), 55);
   assert.equal(quantile([], 0.1), 0);
+});
+
+test('decideCuts: 同一份逐帧分数可以用不同间隔重判（细判不需要重读视频）', () => {
+  // 每两帧一刀（25fps 下 0.04s 一个镜头），分数 70，「不动」的帧是 5
+  const stats = Array.from({ length: 50 }, (_, i) => ({ t: i / 25, score: i % 2 ? 70 : 5 }));
+  const coarse = decideCuts(stats, { threshold: 'auto-low', minGap: 0.35, duration: 2 });
+  const fine = decideCuts(stats, { threshold: 'auto-low', minGap: 1.02 / 25, duration: 2 });
+  assert.ok(coarse.cuts.length <= 5, `粗间隔应该把密刀并掉，实得 ${coarse.cuts.length}`);
+  assert.ok(fine.cuts.length >= 20, `一帧间隔应数出几乎每一刀，实得 ${fine.cuts.length}`);
+});
+
+test('decideCuts: auto-low 用本段自己的低分位，不会被全片平均带偏', () => {
+  const flat = Array.from({ length: 40 }, (_, i) => ({ t: i / 25, score: 30 }));
+  const r = decideCuts(flat, { threshold: 'auto-low', minGap: 1.02 / 25, duration: 1.6 });
+  // 全段同分：阈值取到同分本身，严格大于挡掉整簇 —— 不该报出一堆假刀
+  assert.ok(r.cuts.length <= 1, `同分帧不该整簇进来，实得 ${r.cuts.length}`);
 });

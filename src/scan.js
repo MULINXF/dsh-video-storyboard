@@ -136,6 +136,38 @@ export function autoThreshold(scores, { duration, minGap, floor = 12 } = {}) {
 
 /** 分数分布的摘要，供 suggest() 判断"内容有多密" */
 /**
+ * 从逐帧分数里"判定切点"。纯函数：同一份 stats 可以反复用不同参数重判，不需要再读一次视频。
+ *
+ * 这就是"细扫"真正需要的东西 —— 粗扫已经把每一帧的分数算完了（stats 全量保留），
+ * 重新判定只是换一组阈值/间隔，零 IO。
+ *
+ * @param {Array<{t:number, score:number}>} stats 逐帧分数
+ * @param {{threshold?:number|'auto'|'auto-low', minGap?:number, duration?:number}} opts
+ */
+export function decideCuts(stats, { threshold = 'auto', minGap = 0.35, duration } = {}) {
+  const scores = stats.map((s) => s.score);
+  const used = threshold === 'auto'
+    ? autoThreshold(scores, { duration })
+    : threshold === 'auto-low'
+      ? Math.max(4, quantile(scores, 0.10))
+      : threshold;
+  const eps = 1e-6;
+  const above = stats.filter((s) => s.score > used + eps);
+  // 上限只对 auto 生效：显式阈值是调用方的明确意图
+  const cap = threshold === 'auto' ? autoThreshold(scores, { duration }).target : Infinity;
+  const picked = Number.isFinite(cap) && cap > 0 && above.length > cap
+    ? [...above].sort((a, b) => b.score - a.score).slice(0, cap).sort((a, b) => a.t - b.t)
+    : above;
+  const cuts = suppressClose(picked.map((s) => ({ ...s })), minGap);
+  const hotRatio = stats.length > 0 ? above.length / stats.length : 0;
+  return {
+    cuts,
+    threshold: used,
+    degraded: assessDegraded({ span: duration, cuts: cuts.length, hotRatio }),
+  };
+}
+
+/**
  * 切点计数是不是不可信？连续运镜会被逐帧切成"切点"，于是 cuts=N 变成一个没有节奏含义的数字。
  *
  * 判据：中位镜头 < 0.5 秒，且超过 30% 的帧都在阈值之上 —— 真正的剪辑不会这样，
@@ -243,40 +275,13 @@ export function scanShots(opts) {
         reject(new Error(`ffmpeg exited ${code}: ${stderr.trim().split('\n').slice(-3).join(' | ')}`));
         return;
       }
-      const scores = stats.map((s) => s.score);
-      // 'auto-low'：按本片段自己的低分位取阈值。爆点细扫用这个 —— 快闪素材里
-      // "每秒 6 刀"是常态，用全片平均节奏推出来的阈值会把它们全挡在门外。
-      const used = threshold === 'auto'
-        ? autoThreshold(scores, { duration: end !== undefined ? end - start : frame / fps })
-        : threshold === 'auto-low'
-          ? Math.max(4, quantile(scores, 0.10))
-          : threshold;
-      // 阈值用**严格大于 + 一个极小 ε**：autoThreshold 落在某个分位上时，
-      // 一大堆同分帧会整簇被 `>=` 拖进来（实测过一份素材因此多出三成切点）。
-      // 再用目标个数做上限，保证"同分整簇"不会把节奏带偏。
-      const eps = 1e-6;
-      const above = stats.filter((s) => s.score > used + eps);
-      // 上限只对 auto 生效。显式传 threshold 是调用方的明确意图（"这片就是很快"），
-      // 拿 auto 的目标数去砍它，等于把 6 镜头/秒的素材削到 1.3 镜头/秒。
-      // （实测：3 秒 18 镜头的合成素材，threshold=5 时被削成 4 刀。）
-      const cap = threshold === 'auto'
-        ? autoThreshold(scores, { duration: end !== undefined ? end - start : frame / fps }).target
-        : Infinity;
-      const picked = Number.isFinite(cap) && cap > 0 && above.length > cap
-        ? [...above].sort((a, b) => b.score - a.score).slice(0, cap).sort((a, b) => a.t - b.t)
-        : above;
-      const raw = picked.map((s) => ({ ...s }));
-      const cuts = suppressClose(raw, minGap);
-
-      // 诚实度：中位镜头极短、且大量帧都超过阈值 —— 多半是连续运镜被逐帧切碎，
-      // 这时 cuts=N 这个数字不可信，必须说出来，而不是让模型拿它当节奏依据。
       const span = end !== undefined ? end - start : frame / fps;
-      const hotRatio = stats.length > 0 ? above.length / stats.length : 0;
-      const degraded = assessDegraded({ span, cuts: cuts.length, hotRatio });
+      const decided = decideCuts(stats, { threshold, minGap, duration: span });
+      const cuts = decided.cuts;
 
       resolve({
-        cuts, stats, frames: frame, threshold: used, degraded,
-        summary: scanSummary(scores),
+        cuts, stats, frames: frame, threshold: decided.threshold, degraded: decided.degraded,
+        summary: scanSummary(stats.map((s) => s.score)),
       });
     });
   });

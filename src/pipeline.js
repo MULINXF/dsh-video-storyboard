@@ -8,7 +8,7 @@
 import { probeVideo, DEFAULT_FFMPEG, DEFAULT_FFPROBE } from './probe.js';
 import { resolveInput } from './fetch.js';
 import { loadTranscriptFile } from './transcript-file.js';
-import { scanShots } from './scan.js';
+import { decideCuts, scanShots } from './scan.js';
 import { fitSegments, segmentsFromCuts, totalDur } from './segments.js';
 import { bestLayout, groupByCount, suggest, PLAN_THRESHOLDS } from './plan.js';
 import { findBursts, planCellRanges } from './density.js';
@@ -157,10 +157,9 @@ export async function runStoryboard(opts) {
   let cuts = scan.cuts;
   let refinedBursts = [];
   if (refineBursts && !precomputed && !textOnly) {
-    const r = await refineBurstCuts({
-      input, fps: info.fps, cuts, winStart, winDur, ffmpegPath,
-    }).catch(() => null);
-    if (r) { cuts = r.cuts; refinedBursts = r.refined; }
+    const r = refineBurstCuts({ stats: scan.stats, cuts, fps: info.fps, winStart, winDur });
+    cuts = r.cuts;
+    refinedBursts = r.refined;
   }
 
   // ---- 音频测量（零模型：响度 + 静音）。先做，因为静音位置要用来切 ASR 请求。
@@ -502,32 +501,44 @@ export async function runStoryboard(opts) {
  */
 const MIN_REFINE_SCORE = 25;
 
-export async function refineBurstCuts({
-  input, fps, cuts, winStart, winDur, scanGap = 0.12, ffmpegPath, maxBursts = 3, minCoarse = 3,
-  maxBurstSpan = 8,
+/**
+ * 爆点细扫：**不重新读视频**，只是拿粗扫已经算好的逐帧分数（stats）重新判定一次。
+ *
+ * 一开始我写成了"再跑一遍 ffmpeg、把间隔调小"——那是多余的：`scanShots` 本来就把每一帧的
+ * 分数全量返回了，改个阈值和最小间隔重判即可，零 IO。
+ *
+ * 判定用的是**一帧**的间隔（1/fps），所以"每帧剪一下"这种剪法也数得出来。
+ * 但这么细的间隔会把运镜也切成密集的刀，所以采纳前要过三道闸：
+ *   1) 细判必须数出更多刀
+ *   2) 不能被判成 motion（连续运镜）
+ *   3) 这些刀的分数要够大（真剪辑一次性换画面，运镜每帧只挪一点）
+ *
+ * @returns {{cuts:Array, refined:Array<{from:number,to:number,coarse:number,fine:number}>}}
+ */
+export function refineBurstCuts({
+  stats, cuts, fps, winStart, winDur, maxBursts = 3, minCoarse = 3, maxBurstSpan = 8, minScore = MIN_REFINE_SCORE,
 }) {
   const bursts = findBursts(cuts.map((c) => c.t - winStart), winDur).slice(0, maxBursts);
+  // 一帧的间隔：0.04s 是 25fps 下一帧的长度，更快就没有意义了
+  const gap = Math.max(1.02 / Math.max(1, fps), 0.04);
   let out = cuts.slice();
   const refined = [];
   for (const b of bursts) {
     const from = winStart + b.from;
     const to = winStart + b.to;
     if (to - from < 1) continue;
-    // 爆点是"一小段"，不是"后半部"。23 秒的窗口按 0.12s 间隔重扫既贵又没用（实测 28→29 刀），
-    // 这种长窗口通常是密度曲线的拖尾，不是真快闪。
+    // 爆点是"一小段"，不是"后半部"。23 秒的窗口重判过一次，28 刀 → 29 刀，那是密度曲线的拖尾
     if (to - from > maxBurstSpan) continue;
     const coarse = out.filter((c) => c.t >= from && c.t < to).length;
     if (coarse < minCoarse) continue;
-    const fine = await scanShots({
-      input, fps, start: from, end: to, threshold: 'auto-low', minGap: scanGap, ffmpegPath,
-    });
-    if (fine.degraded === 'motion') continue;     // 连续运镜，不是剪辑，别细扫
-    if (fine.cuts.length <= coarse) continue;      // 没数出更多，白扫
-    // 分数幅度才是"切"和"动"的分界线：实测同一支片里
-    //   真快闪段（18 镜/3 秒）刀均分 59，手掌缓慢运镜 18 —— 两者的"刀数"都很密，
-    //   但运镜每帧只变一点点。低于 25 的一律不当剪辑。
+
+    const windowStats = stats.filter((s) => s.t >= from && s.t < to);
+    const fine = decideCuts(windowStats, { threshold: 'auto-low', minGap: gap, duration: to - from });
+    if (fine.degraded === 'motion') continue;
+    if (fine.cuts.length <= coarse) continue;
     const meanScore = fine.cuts.reduce((a, c) => a + (c.score ?? 0), 0) / Math.max(1, fine.cuts.length);
-    if (meanScore < MIN_REFINE_SCORE) continue;
+    if (meanScore < minScore) continue;
+
     out = out.filter((c) => !(c.t >= from && c.t < to)).concat(fine.cuts).sort((a, b) => a.t - b.t);
     refined.push({ from: +from.toFixed(2), to: +to.toFixed(2), coarse, fine: fine.cuts.length });
   }
