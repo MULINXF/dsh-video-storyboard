@@ -349,8 +349,6 @@ rate move in opposite directions.
 
 ## [0.1.0] — 2026-10-27
 
-## [0.1.0] — 2026-10-27
-
 First working release.
 
 **Tools**
