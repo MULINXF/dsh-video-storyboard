@@ -500,6 +500,9 @@ export async function runStoryboard(opts) {
  * @returns {{cuts:Array, refined:Array<{from:number,to:number,coarse:number,fine:number}>}}
  */
 const MIN_REFINE_SCORE = 25;
+// 整窗平均分高于这个值 → 认为"几乎每帧都在大改"（每帧一剪）。
+// 实测：真每帧一剪 44.5，概念 PV 的快剪窗口 12–18，所以 30 能把两者分开。
+const PER_FRAME_MEAN = 30;
 
 /**
  * 逐窗口重判：**先算画面差异，再按窗口决定用多细的间隔去数刀。**
@@ -521,10 +524,15 @@ export function refineCutsByWindow({
   stats, fps, coarseCuts, winStart = 0, winDur, winSec = 2, minScore = MIN_REFINE_SCORE,
 }) {
   const span = winDur ?? (stats.length ? stats[stats.length - 1].t - winStart : 0);
-  const gap = Math.max(1.02 / Math.max(1, fps), 0.04);     // 一帧：25fps 下 0.041s
+  // 间隔要按内容选：
+  //   - 普通快闪：间隔略大于一帧（1.02/fps），避免同一个镜头的相邻帧被判成两刀；
+  //   - **每帧一剪**：整窗平均分很高（实测 44，普通快闪只有 12–18），这时才把间隔压到一帧以下，
+  //     否则 23 刀只会数出 9 刀。
+  // 用固定的小间隔会把普通动画的快镜放成 19 刀/秒（实测概念 PV 48 → 164），所以必须按窗口内容分流。
   const out = [];
   const refined = [];
-  let open = null;                                          // 正在进行的采纳区间
+  let open = null;
+  let finalGap = Math.max(1.02 / Math.max(1, fps), 0.04);   // 收尾合并用的间隔（遇到每帧一剪会调小）                                          // 正在进行的采纳区间
 
   for (let w = 0; w < span; w += winSec) {
     const from = winStart + w;
@@ -533,6 +541,12 @@ export function refineCutsByWindow({
     const coarse = coarseCuts.filter((c) => c.t >= from && c.t < to);
     if (windowStats.length < 4) { out.push(...coarse); continue; }
 
+    const meanScoreAll = windowStats.reduce((a, s) => a + s.score, 0) / windowStats.length;
+    const perFrame = meanScoreAll >= PER_FRAME_MEAN;        // 整窗几乎每帧都在大改
+    const gap = perFrame
+      ? Math.max(0.9 / Math.max(1, fps), 0.03)              // 一帧以下：每帧一剪也数得出
+      : Math.max(1.02 / Math.max(1, fps), 0.04);            // 略大于一帧：不把同镜头的相邻帧算两刀
+    if (perFrame) finalGap = Math.min(finalGap, gap);
     const fine = decideCuts(windowStats, { threshold: 'auto-low', minGap: gap, duration: to - from });
     const mean = fine.cuts.reduce((a, c) => a + (c.score ?? 0), 0) / Math.max(1, fine.cuts.length);
     const adopt = fine.cuts.length > coarse.length
@@ -556,7 +570,9 @@ export function refineCutsByWindow({
   if (open) refined.push({ from: open.from, to: open.to, coarse: open.coarse, fine: open.count });
 
   return {
-    cuts: suppressClose(out.sort((a, b) => a.t - b.t), gap),
+    // 收尾再并一次：跨窗口边界可能留下贴得很近的两刀。
+    // 间隔取"所有窗口用过的最小值"，否则每帧一剪的结果会在这一步被并回去（实测 21 → 9）。
+    cuts: suppressClose(out.sort((a, b) => a.t - b.t), finalGap),
     refined: refined.map((r) => ({
       from: +r.from.toFixed(2), to: +r.to.toFixed(2), coarse: r.coarse, fine: r.fine,
     })),

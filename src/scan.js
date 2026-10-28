@@ -199,10 +199,15 @@ export function decideCuts(stats, { threshold = 'auto', minGap = 0.35, duration 
     : above;
   const cuts = suppressClose(picked.map((s) => ({ ...s })), minGap);
   const hotRatio = stats.length > 0 ? above.length / stats.length : 0;
+  // 分数序列的变异系数：区分"每帧一剪"和"匀速运镜"
+  const mean = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+  const scoreCv = mean > 0
+    ? Math.sqrt(scores.reduce((a, b) => a + (b - mean) ** 2, 0) / scores.length) / mean
+    : 0;
   return {
     cuts,
     threshold: used,
-    degraded: assessDegraded({ span: duration, cuts: cuts.length, hotRatio }),
+    degraded: assessDegraded({ span: duration, cuts: cuts.length, hotRatio, scoreCv, scoreMean: mean }),
   };
 }
 
@@ -214,10 +219,17 @@ export function decideCuts(stats, { threshold = 'auto', minGap = 0.35, duration 
  *
  * @returns {'motion'|null}
  */
-export function assessDegraded({ span, cuts, hotRatio }) {
+export function assessDegraded({ span, cuts, hotRatio, scoreCv, scoreMean }) {
   if (!(span > 0) || !(cuts > 0)) return null;
   const medianShot = span / cuts;
-  return medianShot < 0.5 && hotRatio > 0.3 ? 'motion' : null;
+  if (medianShot >= 0.5 || hotRatio <= 0.3) return null;
+  // **关键补充**：每帧一剪的素材也会"刀数极密 + 高分帧极多"，和运镜长得一模一样。
+  // 区别在分数序列的平滑度：运镜每帧只变一点点（变异系数很低），
+  // 而每帧一剪是"这一刀变 80、下一刀变 20"（变异系数高）。
+  // 只有"整窗分数都很高"（每帧都在大改）才可能是每帧一剪；
+  // 低均值 + 高变异系数只是"偶尔来一下"，那是真正的运镜素材，仍然判 motion。
+  if (typeof scoreCv === 'number' && scoreCv >= 0.4 && (scoreMean ?? 0) >= 30) return null;
+  return 'motion';
 }
 
 /** 取分位（0..1）。用于"这片就是很快"时的低阈值：按片中自己的分数分布定，而不是全局倍数。 */

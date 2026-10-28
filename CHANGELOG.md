@@ -4,6 +4,16 @@
 
 ### Fixed
 
+- **A cut-on-every-frame edit was counted as 9 shots when there were 23 — and could be dismissed as camera
+  motion.** Two causes: the one-frame gap was `1.02 / fps`, i.e. *longer* than a frame, so adjacent frames
+  merged; and `degraded: 'motion'` fired on any window with a short median shot and many high-scoring frames,
+  which is exactly what a per-frame flash looks like.
+
+  The gap is now chosen per window: `1.02 / fps` normally, `0.9 / fps` when the window's mean score says
+  nearly every frame changed. And `motion` now also requires a *smooth* score series (`cv < 0.4`) — a steady
+  pan varies a little every frame, a flash alternates wildly. Measured: per-frame clip 9 → **21** (true 23),
+  concept PV unchanged at 48, talking head 122 → 124.
+
 - The target-count cap added in 0.2.2 was applied even when the caller passed an explicit `threshold`.
   The cap exists to stop tied frames from dragging in a cluster; applying it to an explicit threshold
   overrode the caller's decision, so fast material could not be counted at all. Measured on a synthetic
