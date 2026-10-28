@@ -242,7 +242,15 @@ export async function runStoryboard(opts) {
   // 窗口口径：transcriptFile 可能给的是整片，不能拿整片 chars 去除以 winDur。
   const transcriptChars = relSegments.reduce((n, seg) => n + String(seg.text ?? '').length, 0);
   // 外部文本只做标记，不改变执行：注入扫描是证据，不是策略。
-  const suspectInjection = findInjection(relSegments, { source: sourceInfo?.url ?? info.path });
+  // 标题也算外部文本（yt-dlp 的 title 会进清单），一并扫；它没有时间码，from/to 留 null。
+  const externalSource = sourceInfo?.url ?? info.path ?? null;
+  const suspectInjection = findInjection(
+    [
+      ...(sourceInfo?.title ? [{ text: sourceInfo.title }] : []),
+      ...relSegments,
+    ],
+    { source: externalSource },
+  );
   const speech = relSegments.length > 0
     ? speechCurve(relSegments, { duration: winDur })
     : null;

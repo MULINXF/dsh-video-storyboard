@@ -37,6 +37,13 @@ const INSTALL_HINT = [
   'Then either put it on PATH or set DSH_YTDLP_PATH to the executable.',
 ].join('\n');
 
+/**
+ * 下载目录里出现 `video.*` 的不一定是画面轨：B 站的 DASH 源会给出 `video.f30280.m4a`
+ * 这种纯音频轨。文件名不能当容器证据（PR #8 的教训），但**扩展名足以判断"这是不是音频"**——
+ * 把 m4a 改名成 video.mp4 才是真正的静默坏数据，宁可在这里报错。
+ */
+const AUDIO_EXTS = new Set(['.m4a', '.m4b', '.mp3', '.aac', '.opus', '.ogg', '.oga', '.wav', '.flac', '.weba']);
+
 /* ------------------------------------------------------------------ 输入判别 */
 
 /** 是不是 http(s) 链接。其它一切（含 file://、裸路径）都按本地文件处理。 */
@@ -552,17 +559,30 @@ export async function fetchMedia(input, opts = {}) {
   let st = await stat(target).catch(() => null);
   if (!st || st.size === 0) {
     const candidates = [];
+    const audioOnly = [];
     for (const name of await readdir(dir).catch(() => [])) {
       if (!name.startsWith('video.') || /\.(part|ytdl|temp)$/i.test(name)) continue;
+      const ext = name.slice(name.lastIndexOf('.')).toLowerCase();
       try {
         const info = await stat(join(dir, name));
-        if (info.isFile() && info.size > 0) candidates.push({ path: join(dir, name), size: info.size });
+        if (!info.isFile() || info.size === 0) continue;
+        if (AUDIO_EXTS.has(ext)) { audioOnly.push(name); continue; }
+        candidates.push({ path: join(dir, name), size: info.size, ext });
       } catch { /* 半成品被并发删除 */ }
     }
-    if (candidates.length === 0) throw new Error('yt-dlp reported success but produced no file');
+    if (candidates.length === 0) {
+      if (audioOnly.length > 0) {
+        throw new Error(
+          `yt-dlp produced audio only (${audioOnly.join(', ')}): ` +
+          'this link gave no video stream to scan. Try again without --allow-anonymous, ' +
+          'or pass a local file path.',
+        );
+      }
+      throw new Error('yt-dlp reported success but produced no file');
+    }
     candidates.sort((a, b) => {
-      const amp = a.path.toLowerCase().endsWith('.mp4') ? 1 : 0;
-      const bmp = b.path.toLowerCase().endsWith('.mp4') ? 1 : 0;
+      const amp = a.ext === '.mp4' ? 1 : 0;
+      const bmp = b.ext === '.mp4' ? 1 : 0;
       return bmp - amp || b.size - a.size;
     });
     await rm(target, { force: true });

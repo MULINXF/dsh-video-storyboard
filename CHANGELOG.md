@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.2] — 2026-10-28
 
 ### Fixed
 
@@ -8,7 +8,11 @@
   previously required the exact name `video.mp4` and failed with
   `unexpected container: ... (expected mp4)` even though the file was a valid video. The file
   is now renamed to the stable `video.mp4` before probing, so the cache and pipeline keep one
-  path contract.
+  path contract. (Reported by @xingyueDanYang on `BV16VxM6dEeb`; fix from PR #8 by
+  @ggfgfgf-on.)
+- A download that produced **audio only** (`video.f30280.m4a`) is now rejected with an explicit
+  message instead of being renamed to `video.mp4`. The rename-by-file-name step above made this
+  failure mode possible: a valid file name is not a valid video stream.
 
 ### Security
 
@@ -17,7 +21,9 @@
   are reported in `manifest.transcript.suspectInjection` with source, timestamp and a bounded
   quote. The run continues; the manifest line explicitly says this is data, not a command.
   This is evidence, not a content filter: false negatives are preferable to flagging ordinary
-  dialogue.
+  dialogue. (Reported by @xingyueDanYang.)
+- The video **title** is scanned too — it is external text that lands in the manifest, and it has
+  no timecode, so its `from`/`to` stay `null` instead of collapsing to second 0.
 
 ## [0.3.1] — 2026-10-28
 

@@ -19,3 +19,6 @@ cookies.txt
 * cookies*.txt
 video.json
 asr.json
+
+# npm 凭据（临时发布用，绝不提交）
+.npmrc

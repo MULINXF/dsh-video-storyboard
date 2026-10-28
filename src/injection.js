@@ -57,8 +57,9 @@ export function findInjection(segments, { source = null, max = 5 } = {}) {
     if (seen.has(quote)) continue;
     seen.add(quote);
     out.push({
-      from: Number.isFinite(Number(seg.from)) ? Number(seg.from) : null,
-      to: Number.isFinite(Number(seg.to)) ? Number(seg.to) : null,
+      // 标题这类没有时间码的文本要留 null，不能被 Number(null)=0 变成"第 0 秒"
+      from: toNumberOrNull(seg.from),
+      to: toNumberOrNull(seg.to),
       pattern: pattern.id,
       quote,
       source,
@@ -66,4 +67,10 @@ export function findInjection(segments, { source = null, max = 5 } = {}) {
     if (out.length >= max) break;
   }
   return out;
+}
+
+function toNumberOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
 }

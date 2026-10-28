@@ -251,6 +251,26 @@ test('fetchMedia: DASH 产出 video.f100022.mp4 时收敛到 video.mp4', async (
   }
 });
 
+test('fetchMedia: 只有音频轨时报清楚的错，不把 m4a 改名成 video.mp4', async () => {
+  const h = await makeHarness();
+  const prev = process.env.FAKE_EXT;
+  process.env.FAKE_EXT = 'm4a';
+  try {
+    await assert.rejects(
+      () => fetchMedia('https://www.bilibili.com/video/BV1audio', {
+        ytdlp: h.ytdlp, env: h.env, cookies: h.cookies, scanHeight: 360,
+      }),
+      /audio only.*video\.m4a/s,
+    );
+    // 缓存目录里不能留下一个假的 video.mp4
+    const left = await readdir(h.media, { recursive: true }).catch(() => []);
+    assert.equal(left.some((n) => String(n).endsWith('video.mp4')), false);
+  } finally {
+    if (prev === undefined) delete process.env.FAKE_EXT; else process.env.FAKE_EXT = prev;
+    await h.cleanup();
+  }
+});
+
 test('fetchMedia: 源最高只有 720 时，标 source-max-720p 而不是假装成功', async () => {
   const h = await makeHarness();
   try {
