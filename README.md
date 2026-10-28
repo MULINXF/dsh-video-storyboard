@@ -53,7 +53,7 @@ People have asked whether this works in [Coopanion](https://github.com/Pal-AI-La
 
 **We did not publish a competing extension.** Two packages doing the same thing only confuse the person installing one, and ours was only a minimal shell.
 
-If you ever need a version that *tracks upstream* instead of a copy that stops following it, `cortico/` holds a written shell that depends on this package rather than duplicating it — verified locally, deliberately unpublished. The reasoning and a side-by-side comparison live in [its README](cortico/README.md).
+If you ever need a version that *tracks upstream* instead of a copy that stops following it, the adapter is thin: depend on this package and wrap it in a Cortico World. The contract and the pitfalls we already mapped are in [docs/cortico-world-notes.md](docs/cortico-world-notes.md) — roughly half an hour to write back.
 
 ## Where the design came from
 

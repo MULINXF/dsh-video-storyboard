@@ -41,7 +41,7 @@ video_storyboard({ input: "https://www.bilibili.com/video/BV1fq4y1u7nC" })
 
 **我们没有再发一个同类扩展。** 两个包做同一件事只会让装的人困惑，而且我们那版只做了最小功能。
 
-如果哪天需要"严格跟上游同步"的版本（而不是一份复制出去、不再跟随本仓库的实现），`cortico/` 目录里有一份写好的壳：它依赖本包、不复制代码，本地验证通过但**没有发布**。理由和对比写在同目录的 [README](cortico/README.md) 里。
+如果哪天需要"严格跟上游同步"的版本（而不是一份复制出去、不再跟随本仓库的实现），成本其实不高：依赖本包 + 接一层 Cortico World 就够。契约和已经踩过的点记在 [docs/cortico-world-notes.md](docs/cortico-world-notes.md)，照着写回去大约半小时。
 
 ## 设计原点（三句话，定了大半架构）
 
